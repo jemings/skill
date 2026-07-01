@@ -1,9 +1,10 @@
 # skill
 
-A Claude Code **plugin marketplace** for issue-driven GitHub work, backed by a
-GitHub Project (v2) board. One plugin (`skill`) bundles four skills, the
-shell functions they call, and the policy/setup docs — so anyone can install and
-run it independently.
+A Claude Code **plugin marketplace** that bundles a growing collection of
+skills. One plugin (`skill`) ships everything: today that's issue-driven
+GitHub work backed by a GitHub Project (v2) board, plus environment-setup
+utilities — more skills land here over time, each as its own
+`skills/<name>/SKILL.md`, sharing this one plugin/marketplace root.
 
 | Skill              | What it does                                                                 |
 | ------------------ | --------------------------------------------------------------------------- |
@@ -11,9 +12,10 @@ run it independently.
 | **gh-pr-reply**    | Fetch a PR's review comments (humans + bots), apply valid fixes, reply to every thread. |
 | **gh-pr-approve**  | Review a colleague's PR, then approve or request changes and file follow-up issues. |
 | **gh-triage**      | Triage Backlog issues — promote ready ones, enhance with code exploration, split, or ask for clarification. |
+| **hud**            | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
 
-The skills share `scripts/github-workflow.sh` (the function SSOT) and a single
-GitHub Project board with a six-state `Status` field:
+The GitHub skills share `scripts/github-workflow.sh` (the function SSOT) and a
+single GitHub Project board with a six-state `Status` field:
 
 ```
 Backlog · Ready · In progress · In review · Approved · Done
@@ -45,8 +47,8 @@ In Claude Code:
 
 Then reload plugins (`/reload-plugins`) if prompted. The skills are invoked as
 `/skill:github-workflow`, `/skill:gh-pr-reply`, `/skill:gh-pr-approve`,
-`/skill:gh-triage` — or auto-trigger from natural-language requests (see each
-skill's description).
+`/skill:gh-triage`, `/skill:hud` — or auto-trigger from natural-language
+requests (see each skill's description).
 
 ## Set up the board
 
@@ -104,11 +106,27 @@ and an optional **local CI gate**. Builds/tests are project-specific, so the gat
 is pluggable — set `CLAUDE_LOCAL_CI_CMD` or add `.github-workflow/local-ci.sh`.
 See [`docs/configuration.md`](docs/configuration.md).
 
+## hud — statusline setup
+
+Installs the statusline (model · cwd/branch · context usage · session token
+totals) into `~/.claude/`, so a new machine or container gets the exact same
+setup in one shot:
+
+```text
+/skill:hud
+```
+
+or just ask "새 환경에 statusline 셋업해줘" / "set up the statusline here". See
+[`skills/hud/SKILL.md`](skills/hud/SKILL.md) for what it installs and how.
+
 ## Repository layout
 
 This is a **single-plugin marketplace**: the repo root is both the marketplace
 and the plugin, so `marketplace.json` (plugin `"source": "."`) and `plugin.json`
-share one root `.claude-plugin/`, and the plugin's components sit at the repo root.
+share one root `.claude-plugin/`, and every skill's components sit at the repo
+root under `skills/<name>/`. New skills land here the same way — add a
+`skills/<name>/SKILL.md` (plus any scripts/references it needs) and it's
+immediately available as `/skill:<name>`.
 
 ```
 .claude-plugin/
@@ -119,7 +137,8 @@ skills/
 ├── github-workflow/SKILL.md
 ├── gh-pr-reply/   (SKILL.md + references/)
 ├── gh-pr-approve/ (SKILL.md + references/)
-└── gh-triage/SKILL.md
+├── gh-triage/SKILL.md
+└── hud/           (SKILL.md + scripts/)
 scripts/
 ├── github-workflow.sh                 # function SSOT
 ├── test-github-workflow.sh            # pure-helper unit tests
