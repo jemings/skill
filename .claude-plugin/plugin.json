@@ -1,7 +1,7 @@
 {
   "name": "skill",
   "version": "0.2.0",
-  "description": "A growing collection of Claude Code skills: issue-driven GitHub workflow (start/finish issue sessions on a GitHub Project board), PR review, review-reply, backlog-triage, and environment setup (statusline) skills.",
+  "description": "A collection of Claude Code skills.",
   "author": {
     "name": "jemings"
   },

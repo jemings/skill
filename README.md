@@ -158,6 +158,8 @@ cd scripts
 bash test-github-workflow.sh   # pure-helper unit tests (no network)
 bash test-shgwt.sh             # worktree helper tests
 shellcheck -x -S warning github-workflow.sh shgwt.sh setup-board.sh
+
+bash ../skills/hud/scripts/test-install.sh   # hud install script (isolated tmp HOME)
 ```
 
 ## Limitations

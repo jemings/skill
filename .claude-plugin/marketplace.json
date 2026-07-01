@@ -3,12 +3,12 @@
   "owner": {
     "name": "jemings"
   },
-  "description": "A growing collection of Claude Code skills — issue-driven GitHub workflow, PR review/triage, and environment setup utilities.",
+  "description": "A collection of Claude Code skills.",
   "plugins": [
     {
       "name": "skill",
       "source": ".",
-      "description": "Start/finish issue-based work sessions on a GitHub Project board (worktree isolation, dependency gates, stacked PRs) plus PR review, review-reply, backlog-triage, and statusline setup skills.",
+      "description": "A collection of Claude Code skills.",
       "version": "0.2.0",
       "author": {
         "name": "jemings"
