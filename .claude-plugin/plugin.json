@@ -1,12 +1,12 @@
 {
-  "name": "github-workflow",
-  "version": "0.1.0",
-  "description": "Issue-driven GitHub workflow for Claude Code: start/finish issue sessions on a GitHub Project board, plus PR review, review-reply, and backlog-triage skills.",
+  "name": "skill",
+  "version": "0.2.0",
+  "description": "A growing collection of Claude Code skills: issue-driven GitHub workflow (start/finish issue sessions on a GitHub Project board), PR review, review-reply, backlog-triage, and environment setup (statusline) skills.",
   "author": {
     "name": "jemings"
   },
-  "homepage": "https://github.com/jemings/github-workflow",
-  "repository": "https://github.com/jemings/github-workflow",
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
   "license": "Apache-2.0",
   "keywords": [
     "github",
@@ -15,6 +15,7 @@
     "pull-requests",
     "project-board",
     "code-review",
-    "triage"
+    "triage",
+    "statusline"
   ]
 }

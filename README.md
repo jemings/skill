@@ -1,7 +1,7 @@
-# github-workflow
+# skill
 
 A Claude Code **plugin marketplace** for issue-driven GitHub work, backed by a
-GitHub Project (v2) board. One plugin (`github-workflow`) bundles four skills, the
+GitHub Project (v2) board. One plugin (`skill`) bundles four skills, the
 shell functions they call, and the policy/setup docs — so anyone can install and
 run it independently.
 
@@ -39,14 +39,14 @@ Backlog · Ready · In progress · In review · Approved · Done
 In Claude Code:
 
 ```text
-/plugin marketplace add jemings/github-workflow
-/plugin install github-workflow@github-workflow
+/plugin marketplace add jemings/skill
+/plugin install skill@skill
 ```
 
 Then reload plugins (`/reload-plugins`) if prompted. The skills are invoked as
-`/github-workflow:github-workflow`, `/github-workflow:gh-pr-reply`,
-`/github-workflow:gh-pr-approve`, `/github-workflow:gh-triage` — or auto-trigger
-from natural-language requests (see each skill's description).
+`/skill:github-workflow`, `/skill:gh-pr-reply`, `/skill:gh-pr-approve`,
+`/skill:gh-triage` — or auto-trigger from natural-language requests (see each
+skill's description).
 
 ## Set up the board
 
