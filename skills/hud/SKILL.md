@@ -26,15 +26,10 @@ allowed-tools: Bash, Read
 bash "${CLAUDE_PLUGIN_ROOT}/skills/hud/scripts/install.sh"
 ```
 
-exit code:
-
-- `0` — 설치 완료 + 샘플 입력 렌더 결과 출력(ANSI 색상 섞인 한 줄, 예:
-  `Sonnet 5 ~ 12%`). 성공.
-- `1` — `jq`/`bash` 미설치. 설치 안내 후 중단.
-- `2` — `settings.json` 병합 실패(원본 보존됨).
-- `3` — 기존 `~/.claude/statusline-*.sh`가 설치할 내용과 달라 stderr에 diff만
-  출력하고 중단(사용자가 직접 커스터마이즈했을 수 있음). diff를 보여주고
-  덮어써도 되는지 확인받은 뒤 `FORCE=1 bash .../install.sh`로 재실행.
+성공·실패 원인과 조치는 stdout/stderr에 그대로 나온다(성공 시 샘플 렌더,
+실패 시 원인 메시지). 예외 하나: exit 3(기존 스크립트와 충돌, 사용자가 직접
+커스터마이즈했을 수 있음)는 diff만 보여주고 중단하므로, **사용자 승인 전에는
+`FORCE=1`로 재실행하지 말 것**.
 
 ## Notes
 
