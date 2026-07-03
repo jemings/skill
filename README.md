@@ -13,6 +13,7 @@ utilities — more skills land here over time, each as its own
 | **gh-pr-approve**  | Review a colleague's PR, then approve or request changes and file follow-up issues. |
 | **gh-triage**      | Triage Backlog issues — promote ready ones, enhance with code exploration, split, or ask for clarification. |
 | **hud**            | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
+| **skill-optimizer** | Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts: measure → invariants → plan → five levers (description slim, prose compression, reference split, shell externalization, hook absorption) → verify. Also detects duplicated skill copies and unifies them. |
 
 The GitHub skills share `scripts/github-workflow.sh` (the function SSOT) and a
 single GitHub Project board with a six-state `Status` field:
@@ -47,7 +48,7 @@ In Claude Code:
 
 Then reload plugins (`/reload-plugins`) if prompted. The skills are invoked as
 `/skill:github-workflow`, `/skill:gh-pr-reply`, `/skill:gh-pr-approve`,
-`/skill:gh-triage`, `/skill:hud` — or auto-trigger from natural-language
+`/skill:gh-triage`, `/skill:hud`, `/skill:skill-optimizer` — or auto-trigger from natural-language
 requests (see each skill's description).
 
 ## Set up the board

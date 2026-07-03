@@ -9,7 +9,7 @@
       "name": "skill",
       "source": ".",
       "description": "A collection of Claude Code skills.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": {
         "name": "jemings"
       },
@@ -24,7 +24,9 @@
         "project-board",
         "code-review",
         "triage",
-        "statusline"
+        "statusline",
+        "skill-optimization",
+        "token-efficiency"
       ]
     }
   ]
