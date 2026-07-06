@@ -1,0 +1,16 @@
+{
+  "name": "gh-pr-reply",
+  "version": "1.0.0",
+  "description": "Fetch a GitHub PR's review comments (humans + bots), apply valid fixes, and reply to every thread.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review"
+  ]
+}

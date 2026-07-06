@@ -3,31 +3,40 @@
   "owner": {
     "name": "jemings"
   },
-  "description": "A collection of Claude Code skills.",
+  "description": "A collection of independently installable Claude Code skills.",
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
   "plugins": [
     {
-      "name": "skill",
-      "source": ".",
-      "description": "A collection of Claude Code skills.",
-      "version": "0.3.0",
-      "author": {
-        "name": "jemings"
-      },
-      "license": "Apache-2.0",
-      "homepage": "https://github.com/jemings/skill",
-      "repository": "https://github.com/jemings/skill",
-      "keywords": [
-        "github",
-        "workflow",
-        "issues",
-        "pull-requests",
-        "project-board",
-        "code-review",
-        "triage",
-        "statusline",
-        "skill-optimization",
-        "token-efficiency"
-      ]
+      "name": "github-workflow",
+      "source": "github-workflow",
+      "description": "Start/finish GitHub Issue-based work sessions backed by a Project (v2) board: worktree-isolated branches, dependency gating, PR creation, and status transitions."
+    },
+    {
+      "name": "gh-triage",
+      "source": "gh-triage",
+      "description": "Triage GitHub Backlog issues — promote ready ones, enhance with code exploration, split clear sub-items, or ask for clarification."
+    },
+    {
+      "name": "gh-pr-reply",
+      "source": "gh-pr-reply",
+      "description": "Fetch a GitHub PR's review comments (humans + bots), apply valid fixes, and reply to every thread."
+    },
+    {
+      "name": "gh-pr-approve",
+      "source": "gh-pr-approve",
+      "description": "Review a colleague's GitHub PR, then approve it or request changes and file follow-up issues."
+    },
+    {
+      "name": "hud",
+      "source": "hud",
+      "description": "Install a Claude Code statusline (model, cwd/branch, context usage, session token totals) into a fresh environment."
+    },
+    {
+      "name": "skill-optimizer",
+      "source": "skill-optimizer",
+      "description": "Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts."
     }
   ]
 }

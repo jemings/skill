@@ -1870,18 +1870,17 @@ esac
 unset _cleanup_dispatch_probe
 
 echo ""
-echo "── claude-cleanup-worktree: shgwt teardown 위임 (#144) ──"
+echo "── claude-cleanup-worktree → _claude-worktree-teardown 연결 ──"
 
-# 워크트리 경로가 존재하면 본 함수는 worktree 제거를 직접 하지 않고
-# `bash scripts/shgwt.sh teardown` 으로 위임해야 한다 (PR 머지 명령에서
-# `--delete-branch` 가 빠진 후 정리 책임이 cleanup 단계로 옮겨왔다).
-#
-# 위임 자체를 검증하기 위해 mktemp 안에 가짜 worktree 디렉토리만 만들고
-# git rev-parse --abbrev-ref 만 모킹한다. shgwt 는 별도 bash 프로세스로
-# 실행되므로 셸 함수 mock 을 상속받지 않고 실제 git 을 호출 → mktemp 가
-# git 저장소가 아니라 즉시 거부 → 본 함수는 "shgwt teardown 실패" 진단을
-# 출력하고 return 1 해야 한다. 위임 호출이 빠지면 이 경로 자체가 실행되지
-# 않아 진단 메시지가 누락된다.
+# 워크트리 경로가 존재하면 본 함수는 (더 이상 별도 스크립트로 위임하지 않고)
+# `_claude-worktree-teardown` 을 `cd "$worktree_path"` 서브셸 안에서 직접
+# 호출해야 한다. git rev-parse --abbrev-ref 만 "main" 으로 모킹하고 나머지
+# git 호출은 전부 성공(빈 출력)시키면, teardown 서브셸 안에서도 현재 브랜치가
+# "main" 으로 관측되어 teardown 내부의 보호 브랜치 가드(case main|master|HEAD)
+# 가 걸린다 — 연결 자체가 빠지면 이 경로가 전혀 실행되지 않아 아래 진단
+# 메시지가 누락된다. 미커밋/미푸시 등 실제 git 상호작용(worktree remove·
+# checkout·merge --ff-only)의 실전 동작은 구 scripts/test-shgwt.sh 방침과
+# 동일하게 이 파일에서 자동 검증하지 않고 통합 환경에서 수동 검증한다(:7).
 
 _cleanup_delegate_probe=$(
   cd "$(mktemp -d)" || exit 1
@@ -1904,18 +1903,18 @@ _cleanup_delegate_probe=$(
 )
 
 case "$_cleanup_delegate_probe" in
-  *"shgwt teardown 실패"*) assert_eq "위임 실패 시 진단 메시지" "ok" "ok" ;;
-  *)                       assert_eq "위임 실패 시 진단 메시지" "ok" "missing in: $_cleanup_delegate_probe" ;;
+  *"보호 대상"*) assert_eq "teardown 내부 보호 브랜치 가드 진입" "ok" "ok" ;;
+  *)             assert_eq "teardown 내부 보호 브랜치 가드 진입" "ok" "missing in: $_cleanup_delegate_probe" ;;
 esac
 
 case "$_cleanup_delegate_probe" in
-  *"[rc=1]"*) assert_eq "위임 실패 시 return 1" "ok" "ok" ;;
-  *)          assert_eq "위임 실패 시 return 1" "ok" "missing in: $_cleanup_delegate_probe" ;;
+  *"worktree 정리 실패"*) assert_eq "teardown 실패 시 진단 메시지" "ok" "ok" ;;
+  *)                      assert_eq "teardown 실패 시 진단 메시지" "ok" "missing in: $_cleanup_delegate_probe" ;;
 esac
 
 case "$_cleanup_delegate_probe" in
-  *"teardown --force"*) assert_eq "강제정리 안내 메시지" "ok" "ok" ;;
-  *)                    assert_eq "강제정리 안내 메시지" "ok" "missing in: $_cleanup_delegate_probe" ;;
+  *"[rc=1]"*) assert_eq "teardown 실패 시 return 1" "ok" "ok" ;;
+  *)          assert_eq "teardown 실패 시 return 1" "ok" "missing in: $_cleanup_delegate_probe" ;;
 esac
 
 unset _cleanup_delegate_probe
@@ -4351,7 +4350,7 @@ echo "── #1467: claude-adopt-worktree 정적 가드 ────────
 # git-common-dir 비교가 살아있는지. 빠지면 worktree 내부 재호출이 main 동작을
 # 수행해 위험하다. git worktree add / reset --hard / stash 의 실전 동작은 단위
 # 테스트로 검증하지 않으며(이 파일 :7 방침), #1467 본문의 "adopt-worktree 통합
-# 검증" 절차(임시 브랜치 → shgwt.sh teardown)로 수동 수행한다.
+# 검증" 절차(임시 브랜치 → claude-cleanup-worktree)로 수동 수행한다.
 if grep -q -- '--git-common-dir' "${SCRIPT_DIR}/github-workflow.sh"; then
   PASS=$((PASS + 1))
   printf '  ✅ %s\n' "claude-adopt-worktree 가 git-common-dir 멱등 가드를 포함 (#1467)"

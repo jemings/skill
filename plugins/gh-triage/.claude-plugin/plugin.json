@@ -1,0 +1,17 @@
+{
+  "name": "gh-triage",
+  "version": "1.0.0",
+  "description": "Triage GitHub Backlog issues — promote ready ones, enhance with code exploration, split clear sub-items, or ask for clarification.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "triage",
+    "issues",
+    "project-board"
+  ]
+}

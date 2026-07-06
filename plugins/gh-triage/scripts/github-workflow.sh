@@ -1,0 +1,1 @@
+../../github-workflow/scripts/github-workflow.sh

@@ -1,0 +1,15 @@
+{
+  "name": "skill-optimizer",
+  "version": "1.0.0",
+  "description": "Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "skill-optimization",
+    "token-efficiency"
+  ]
+}

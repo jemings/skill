@@ -1,7 +1,7 @@
 {
-  "name": "skill",
-  "version": "0.2.0",
-  "description": "A collection of Claude Code skills.",
+  "name": "github-workflow",
+  "version": "1.0.0",
+  "description": "Start/finish GitHub Issue-based work sessions backed by a Project (v2) board: worktree-isolated branches, dependency gating, PR creation, and status transitions.",
   "author": {
     "name": "jemings"
   },
@@ -13,9 +13,6 @@
     "workflow",
     "issues",
     "pull-requests",
-    "project-board",
-    "code-review",
-    "triage",
-    "statusline"
+    "project-board"
   ]
 }

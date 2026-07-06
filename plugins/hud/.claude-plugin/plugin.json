@@ -1,0 +1,14 @@
+{
+  "name": "hud",
+  "version": "1.0.0",
+  "description": "Install a Claude Code statusline (model, cwd/branch, context usage, session token totals) into a fresh environment.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "statusline"
+  ]
+}

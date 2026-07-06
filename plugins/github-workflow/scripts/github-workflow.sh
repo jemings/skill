@@ -2490,8 +2490,7 @@ claude-adopt-worktree() {
   local title="${2:-}"
 
   # ── 1. worktree 내부 가드 (멱등 no-op) ──
-  # git-common-dir 과 git-dir 의 절대경로 비교 (shgwt_in_main_repo 와 동일 기법,
-  # 의존성 없이 인라인). 둘이 다르면 worktree 내부 → 이미 격리됨.
+  # git-common-dir 과 git-dir 의 절대경로 비교. 둘이 다르면 worktree 내부 → 이미 격리됨.
   local common dir common_abs dir_abs
   if ! common=$(git rev-parse --git-common-dir 2>/dev/null) \
     || ! dir=$(git rev-parse --git-dir 2>/dev/null); then
@@ -2699,6 +2698,131 @@ claude-start-issue() {
 }
 
 # ────────────────────────────────────────────────────────────────────
+# 헬퍼 — 현재 브랜치 커밋이 안전하게 폐기 가능한가 (main worktree teardown 전 검사)
+#   1) upstream 과 정확히 일치
+#   2) HEAD 가 main_ref 의 조상
+#   3) git cherry 결과에 '+' 없음 (rebase/squash merge 후)
+#   4) upstream 미설정 + main_ref 대비 ahead == 0
+# main_ref 는 origin/HEAD 를 1순위로 선택 — default branch 가 main 이 아닌
+# 레포에서도 올바른 기준 ref 를 쓴다.
+# ────────────────────────────────────────────────────────────────────
+_claude-worktree-commits-safe() {
+  local local_rev remote_rev main_ref
+  local_rev="$(git rev-parse HEAD)"
+  remote_rev="$(git rev-parse '@{u}' 2>/dev/null || echo "no-upstream")"
+  if [[ "$remote_rev" != "no-upstream" && "$local_rev" == "$remote_rev" ]]; then
+    return 0
+  fi
+  main_ref="origin/HEAD"
+  git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1 || main_ref="origin/main"
+  git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1 || main_ref="origin/master"
+  git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1 || main_ref="main"
+  git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1 || main_ref="master"
+  if git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1; then
+    if git merge-base --is-ancestor HEAD "$main_ref" 2>/dev/null; then
+      return 0
+    fi
+    local cherry_out
+    cherry_out="$(git cherry "$main_ref" HEAD 2>/dev/null)" || cherry_out="+"
+    [[ "$cherry_out" != *"+"* ]] && return 0
+  fi
+  if [[ "$remote_rev" == "no-upstream" ]]; then
+    local ahead
+    ahead="$(git rev-list --count "${main_ref}..HEAD" 2>/dev/null || echo 999)"
+    [[ "$ahead" == "0" ]] && return 0
+  fi
+  return 1
+}
+
+# ────────────────────────────────────────────────────────────────────
+# 헬퍼 — worktree 내부에서 실제 teardown 수행 (제거 + main ff-only 동기화 +
+# 브랜치 삭제, 한 트랜잭션). claude-cleanup-worktree 가 `cd "$worktree_path"`
+# 서브셸 안에서 호출한다 (호출자 PWD인 main worktree 보존).
+#
+# 미커밋·미푸시 변경이 있으면 거부하고 사용자가 직접 실행할 git 명령을
+# 안내한다 — 자동 폐기(force)는 지원하지 않는다: 이 함수는 claude-close-issue
+# 이후 정리 단계에서 항상 호출되므로, 자동 폐기를 지원하면 세션이 모르는 새
+# 실제 작업을 날릴 위험이 생긴다.
+# ────────────────────────────────────────────────────────────────────
+_claude-worktree-teardown() {
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "❌ 미커밋 변경이나 untracked 파일이 있습니다." >&2
+    echo "   커밋/스태시 하거나, 버리려면: git reset --hard && git clean -fd" >&2
+    return 1
+  fi
+
+  git fetch origin >/dev/null 2>&1 || echo "⚠️  git fetch 실패 — merged 판정이 stale 할 수 있습니다." >&2
+
+  if ! _claude-worktree-commits-safe; then
+    local cur main_ref ahead
+    cur="$(git rev-parse --abbrev-ref HEAD)"
+    main_ref="origin/HEAD"
+    git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1 || main_ref="origin/main"
+    git rev-parse --verify --quiet "$main_ref" >/dev/null 2>&1 || main_ref="origin/master"
+    ahead="$(git rev-list --count "${main_ref}..HEAD" 2>/dev/null || echo "?")"
+    echo "❌ '${cur}' 에 미푸시 커밋이 있습니다 (${main_ref} 대비 ${ahead} ahead)." >&2
+    echo "   Push:     git push -u origin $cur" >&2
+    echo "   또는 버리려면: git reset --hard $main_ref" >&2
+    return 1
+  fi
+
+  local wt_path branch main_repo
+  wt_path="$(git rev-parse --show-toplevel)"
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  main_repo="$(claude-main-worktree-path)"
+
+  case "$branch" in
+    main | master | HEAD)
+      echo "❌ 현재 브랜치 '$branch' 는 보호 대상입니다. teardown 거부." >&2
+      return 1
+      ;;
+  esac
+
+  cd "$main_repo" || {
+    echo "❌ 메인 레포로 cd 실패: $main_repo" >&2
+    return 1
+  }
+
+  git worktree remove "$wt_path" || return 1
+  git worktree prune
+
+  local main_branch="main"
+  git rev-parse --verify --quiet "main" >/dev/null 2>&1 || main_branch="master"
+
+  local main_sync_ok=true
+  if ! git checkout -q "$main_branch" 2>/dev/null; then
+    echo "⚠️  checkout $main_branch 실패 — 메인 레포 정리는 수동으로." >&2
+    main_sync_ok=false
+  elif git rev-parse --verify --quiet "origin/$main_branch" >/dev/null 2>&1; then
+    if ! git merge --ff-only "origin/$main_branch" >/dev/null 2>&1; then
+      main_sync_ok=false
+      echo "⚠️  ff-only 동기화 실패 — 로컬 $main_branch 가 origin 과 갈라졌습니다." >&2
+    fi
+  else
+    main_sync_ok=false
+    echo "⚠️  origin/$main_branch 미발견 — sync 건너뜀." >&2
+  fi
+
+  if git branch -d "$branch" 2>/dev/null; then
+    echo "✅ 브랜치 삭제: $branch"
+  else
+    echo "⚠️  브랜치 '$branch' 가 fully merged 가 아닙니다. 수동 삭제: git branch -D $branch" >&2
+  fi
+
+  if [[ "$main_sync_ok" == true ]]; then
+    echo "✅ Teardown 완료"
+    echo "   Removed: $wt_path"
+    echo "   Now on:  $main_branch ($main_repo)"
+    return 0
+  fi
+
+  echo "⚠️  Teardown 부분 완료 — worktree 는 제거됐으나 main 이 origin 과 미동기화" >&2
+  echo "   Removed: $wt_path" >&2
+  echo "   Now on:  $main_branch (out of sync, $main_repo)" >&2
+  return 1
+}
+
+# ────────────────────────────────────────────────────────────────────
 # 보조 — 이슈 worktree 정리
 # 사용법: claude-cleanup-worktree <issue-number|pr-number>
 # 실행 위치: main worktree (자기 자신 내부에서는 제거 불가).
@@ -2712,12 +2836,6 @@ claude-start-issue() {
 # headRefName 의 issue-<N> 패턴에서 이슈 번호를 역추출해 같은 worktree 경로로
 # 진행한다 — 리뷰/머지 직후 "이 PR 의 worktree 정리해야지" 흐름에서 사용자가
 # PR→이슈 번호로 수동 역변환하지 않게 한다.
-#
-# 정리 위임 (#144): 실제 worktree 제거 + main ff-only 동기화 + 브랜치 삭제는
-# `shgwt teardown` 으로 위임한다. PR 머지 명령에서 `--delete-branch` 를 뺀
-# 이유(#121 worktree 충돌 방지)에 맞춰, 브랜치 삭제 책임이 본 함수로 옮겨왔다.
-# `shgwt teardown` 은 미커밋·미푸시 양쪽을 한 번에 검사하므로 사용자가 모르고
-# 작업을 날릴 위험은 그대로 차단된다 (`--force` 미사용 정책 유지).
 # ────────────────────────────────────────────────────────────────────
 claude-cleanup-worktree() {
   local arg="${1:-}"
@@ -2765,15 +2883,11 @@ claude-cleanup-worktree() {
     return 0
   fi
 
-  # shgwt teardown 위임 — worktree 제거 + main ff-only 동기화 + 브랜치 삭제까지
-  # 한 트랜잭션으로 처리. shgwt 는 워크트리 내부에서 자기 자신을 정리하는 형태로
+  # _claude-worktree-teardown 은 워크트리 내부에서 자기 자신을 정리하는 형태로
   # 호출해야 하므로 서브셸 cd 후 실행한다 (호출자 PWD 보존).
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-  if ! ( cd "$worktree_path" && bash "${script_dir}/shgwt.sh" teardown ); then
-    echo "❌ shgwt teardown 실패: ${worktree_path}" >&2
-    echo "   확인:    cd ${worktree_path} && git status" >&2
-    echo "   강제정리: cd ${worktree_path} && bash \"${script_dir}/shgwt.sh\" teardown --force" >&2
+  if ! ( cd "$worktree_path" && _claude-worktree-teardown ); then
+    echo "❌ worktree 정리 실패: ${worktree_path}" >&2
+    echo "   확인: cd ${worktree_path} && git status" >&2
     return 1
   fi
 

@@ -1,0 +1,16 @@
+{
+  "name": "gh-pr-approve",
+  "version": "1.0.0",
+  "description": "Review a colleague's GitHub PR, then approve it or request changes and file follow-up issues.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review"
+  ]
+}
