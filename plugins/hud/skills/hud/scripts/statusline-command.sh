@@ -8,7 +8,7 @@ input=$(cat)
 # space/tab/newline이면 연속 구분자를 하나로 squeeze해 빈 필드가 사라지므로
 # (rate_limits 등 값이 자주 비는 필드에서 뒤 필드들이 앞으로 밀리는 버그 유발),
 # @tsv 대신 join으로 직접 구성한다.
-IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct < <(echo "$input" | jq -r '
+IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct session_resets_at < <(echo "$input" | jq -r '
   (.context_window.current_usage // {}) as $u
   | [
       (.model.display_name // .model.id // "unknown"),
@@ -18,7 +18,8 @@ IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct < <(echo "$input
         + ($u.cache_read_input_tokens // 0)
         + ($u.cache_creation_input_tokens // 0)
         | if . > 0 then tostring else "" end),
-      (.rate_limits.five_hour.used_percentage // "" | tostring)
+      (.rate_limits.five_hour.used_percentage // "" | tostring),
+      (.rate_limits.five_hour.resets_at // "" | tostring)
     ]
   | join("")
 ')
@@ -96,6 +97,9 @@ RED="\033[31m"
 DIM="\033[2m"
 
 # /usage 의 "Current session"(5시간 한도) 과 동일한 값 — 임계값별 색상 (#1750).
+# 접두어는 리셋까지 남은 시간을 표시한다: 1시간 초과면 "3.5h:"(소수 첫째 자리
+# 반올림), 1시간 이내면 "59m:"(분 단위 반올림). resets_at(Unix epoch 초)이
+# 없거나 이미 지난 값이면 고정 "5h:" 로 폴백한다.
 session_segment=""
 if [ -n "$session_pct" ]; then
     session_int=$(awk -v n="$session_pct" 'BEGIN{ printf "%.0f", n }')
@@ -106,7 +110,22 @@ if [ -n "$session_pct" ]; then
     else
         session_color="$GREEN"
     fi
-    session_segment="$(printf '%s5h:%s%%%s' "$session_color" "$session_int" "$RESET")"
+    session_prefix="5h"
+    if [[ "$session_resets_at" =~ ^[0-9]+$ ]]; then
+        remaining=$(( session_resets_at - $(date +%s) ))
+        if [ "$remaining" -gt 0 ]; then
+            session_prefix=$(awk -v r="$remaining" 'BEGIN{
+                if (r < 3600) {
+                    m = int(r / 60 + 0.5)
+                    if (m < 1) m = 1
+                    if (m >= 60) printf "1.0h"; else printf "%dm", m
+                } else {
+                    printf "%.1fh", r / 3600
+                }
+            }')
+        fi
+    fi
+    session_segment="$(printf '%s%s:%s%%%s' "$session_color" "$session_prefix" "$session_int" "$RESET")"
 fi
 
 # 색으로 각 영역이 구분되므로 구분선(|) 없이 공백으로만 분리 (#1750).
