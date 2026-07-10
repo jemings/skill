@@ -2,13 +2,15 @@
 # 프롬프트마다 실행되는 렌더러이므로 일부 값 누락 시 빈 statusline보다
 # 부분 정보를 표시하는 편이 낫다 — `set -euo pipefail`은 의도적으로 제외.
 
-input=$(cat)
+source "$(dirname "${BASH_SOURCE[0]}")/statusline-tokens.sh"
+
+IFS= read -r -d "" input
 
 # 필드 구분자로 탭(\t) 대신 \x1f(unit separator) 사용 — bash read는 IFS가
 # space/tab/newline이면 연속 구분자를 하나로 squeeze해 빈 필드가 사라지므로
 # (rate_limits 등 값이 자주 비는 필드에서 뒤 필드들이 앞으로 밀리는 버그 유발),
 # @tsv 대신 join으로 직접 구성한다.
-IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct session_resets_at < <(echo "$input" | jq -r '
+IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct session_resets_at transcript_path session_id < <(printf '%s' "$input" | jq -r '
   (.context_window.current_usage // {}) as $u
   | [
       (.model.display_name // .model.id // "unknown"),
@@ -19,7 +21,9 @@ IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct session_resets_a
         + ($u.cache_creation_input_tokens // 0)
         | if . > 0 then tostring else "" end),
       (.rate_limits.five_hour.used_percentage // "" | tostring),
-      (.rate_limits.five_hour.resets_at // "" | tostring)
+      (.rate_limits.five_hour.resets_at // "" | tostring),
+      (.transcript_path // ""),
+      (.session_id // "")
     ]
   | join("\u001f")
 ')
@@ -59,9 +63,12 @@ compact_path() {
 
 display_cwd=""
 git_branch=""
-if git_root=$(git -C "$cwd" --no-optional-locks rev-parse --show-toplevel 2>/dev/null); then
+if git_info=$(git -C "$cwd" --no-optional-locks rev-parse --show-toplevel --abbrev-ref HEAD 2>/dev/null); then
+    git_root=${git_info%%$'\n'*}
+    br=${git_info#*$'\n'}
     display_cwd=$(abbrev_home "$git_root")
-    if br=$(git -C "$cwd" --no-optional-locks symbolic-ref --short HEAD 2>/dev/null); then
+    # detached HEAD -> "HEAD"; 단일 라인 폴백 시 br==git_root -> 브랜치 미표시(구 symbolic-ref 동작 유지).
+    if [ "$br" != "HEAD" ] && [ "$br" != "$git_root" ]; then
         git_branch="$br"
     fi
 else
@@ -72,7 +79,8 @@ display_cwd=$(compact_path "$display_cwd")
 fmt_tokens() {
     local n=$1
     if [ "$n" -ge 1000 ]; then
-        awk -v n="$n" 'BEGIN{ printf "%.1fk", n/1000 }'
+        local t=$(( (n * 10 + 500) / 1000 ))
+        printf '%d.%dk' "$(( t / 10 ))" "$(( t % 10 ))"
     else
         printf '%s' "$n"
     fi
@@ -102,7 +110,7 @@ DIM="\033[2m"
 # 없거나 이미 지난 값이면 고정 "5h:" 로 폴백한다.
 session_segment=""
 if [ -n "$session_pct" ]; then
-    session_int=$(awk -v n="$session_pct" 'BEGIN{ printf "%.0f", n }')
+    printf -v session_int '%.0f' "$session_pct"
     if [ "$session_int" -ge 80 ]; then
         session_color="$RED"
     elif [ "$session_int" -ge 50 ]; then
@@ -112,17 +120,16 @@ if [ -n "$session_pct" ]; then
     fi
     session_prefix="5h"
     if [[ "$session_resets_at" =~ ^[0-9]+$ ]]; then
-        remaining=$(( session_resets_at - $(date +%s) ))
+        remaining=$(( session_resets_at - EPOCHSECONDS ))
         if [ "$remaining" -gt 0 ]; then
-            session_prefix=$(awk -v r="$remaining" 'BEGIN{
-                if (r < 3600) {
-                    m = int(r / 60 + 0.5)
-                    if (m < 1) m = 1
-                    if (m >= 60) printf "1.0h"; else printf "%dm", m
-                } else {
-                    printf "%.1fh", r / 3600
-                }
-            }')
+            if [ "$remaining" -lt 3600 ]; then
+                m=$(( (remaining + 30) / 60 ))
+                (( m < 1 )) && m=1
+                if (( m >= 60 )); then session_prefix="1.0h"; else session_prefix="${m}m"; fi
+            else
+                tenths=$(( (remaining * 10 + 1800) / 3600 ))
+                session_prefix="$(( tenths / 10 )).$(( tenths % 10 ))h"
+            fi
         fi
     fi
     session_segment="$(printf '%s%s:%s%%%s' "$session_color" "$session_prefix" "$session_int" "$RESET")"
@@ -149,6 +156,6 @@ if [ -n "$session_segment" ]; then
 fi
 
 # 세션 누적 토큰 세그먼트 (#1750) — 헬퍼가 선행 구분자 포함 문자열 반환(transcript 없으면 빈 문자열).
-out+="$(printf '%s' "$input" | bash "$(dirname "$0")/statusline-tokens.sh")"
+out+="$(_token_segment "$transcript_path" "$session_id")"
 
 printf "%b" "$out"
