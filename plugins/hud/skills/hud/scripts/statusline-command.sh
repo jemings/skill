@@ -21,7 +21,7 @@ IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct session_resets_a
       (.rate_limits.five_hour.used_percentage // "" | tostring),
       (.rate_limits.five_hour.resets_at // "" | tostring)
     ]
-  | join("")
+  | join("\u001f")
 ')
 
 # 모델 표기 압축: "Opus 4.8 (1M context)" → "Opus 4.8 (1M)" (#1750).
