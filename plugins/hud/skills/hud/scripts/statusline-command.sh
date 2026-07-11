@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# hud-statusline-version: 1
+# ↑ statusline 스크립트 쌍(command/tokens)의 단일 버전 표식 — install.sh 의
+# 다운그레이드 가드가 비교한다. 어느 한쪽이라도 수정하면 두 파일 모두 +1.
 # 프롬프트마다 실행되는 렌더러이므로 일부 값 누락 시 빈 statusline보다
 # 부분 정보를 표시하는 편이 낫다 — `set -euo pipefail`은 의도적으로 제외.
 

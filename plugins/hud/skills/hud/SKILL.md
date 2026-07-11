@@ -30,10 +30,19 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/hud/scripts/install.sh"
 
 성공·실패 원인과 조치는 stdout/stderr에 그대로 나온다(성공 시 샘플 렌더,
 실패 시 원인 메시지). 기존 스크립트가 설치할 내용과 다르면 diff를 경고로
-보여준 뒤 덮어쓴다.
+보여준 뒤 덮어쓴다. 단, 소스의 버전 표식(`hud-statusline-version`)이 설치본보다
+낮으면 다운그레이드로 판단해 exit 3 으로 차단하고 소스 갱신 방법을 안내한다 —
+낡은 플러그인 캐시에서 실행된 경우가 전형이다. 사용자가 명시적으로 원할 때만
+`FORCE=1` 로 강제 덮어쓴다.
 
 ## Notes
 
 세션 누적 토큰 세그먼트(↑/↓)는 `~/.cache/claude-statusline/`에 transcript별
 캐시·baseline 파일을 둔다 — 설치 시점에는 생성되지 않고 첫 실제 렌더에서
 자동 생성된다.
+
+다운그레이드 가드는 가드가 포함된 소스(hud 1.1.0+)에서 실행될 때만 동작한다 —
+가드 이전 버전이 남아 있는 플러그인 캐시가 install.sh 를 실행하면 여전히
+설치본을 되돌릴 수 있으므로, 각 환경에서 한 번은
+`claude plugin marketplace update skill && claude plugin update hud@skill` 로
+캐시를 갱신해 두어야 가드가 유효하다.

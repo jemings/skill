@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# hud-statusline-version: 1
+# ↑ statusline 스크립트 쌍(command/tokens)의 단일 버전 표식 — install.sh 의
+# 다운그레이드 가드가 비교한다. 어느 한쪽이라도 수정하면 두 파일 모두 +1.
 # 세션 누적 토큰 세그먼트 라이브러리 — _token_segment(transcript_path, session_id) 정의만.
 # statusline.sh 가 source 후 호출하고, scripts/test-statusline-tokens.sh 가 source 해 단위 테스트한다.
 # 로드 시 부수효과 없음(함수 정의뿐). 렌더러 특성상 실패 단계는 빈 문자열/return 으로 나머지 statusline 을 살린다.
