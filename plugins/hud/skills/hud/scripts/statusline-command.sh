@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hud-statusline-version: 3
+# hud-statusline-version: 4
 # ↑ statusline 스크립트 쌍(command/tokens)의 단일 버전 표식 — install.sh 의
 # 다운그레이드 가드가 비교한다. 어느 한쪽이라도 수정하면 두 파일 모두 +1.
 # 프롬프트마다 실행되는 렌더러이므로 일부 값 누락 시 빈 statusline보다
@@ -38,7 +38,7 @@ model=${model%% (*}
 abbrev_home() {
     case "$1" in
         "$HOME") printf '~' ;;
-        "$HOME"/*) printf '~%s' "${1#$HOME}" ;;
+        "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
         *) printf '%s' "$1" ;;
     esac
 }
