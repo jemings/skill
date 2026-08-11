@@ -104,7 +104,9 @@ BOLD="\033[1m"
 GREEN="\033[32m"
 CYAN="\033[36m"
 YELLOW="\033[33m"
-MAGENTA="\033[35m"
+# 컨텍스트 세그먼트는 기본 magenta(35)가 다크 테마에서 배경과 대비가 낮아
+# 밝은 변형(95) + BOLD 로 띄운다 — 색상 정체성은 유지하면서 가독성만 올린다.
+MAGENTA="\033[95m"
 RED="\033[31m"
 DIM="\033[2m"
 
@@ -152,7 +154,7 @@ if [ -n "$git_branch" ]; then
 fi
 if [ -n "$ctx_segment" ]; then
     out+="${SEP}"
-    out+="${MAGENTA}${ctx_segment}${RESET}"
+    out+="${BOLD}${MAGENTA}${ctx_segment}${RESET}"
 fi
 if [ -n "$session_segment" ]; then
     out+="${SEP}"
