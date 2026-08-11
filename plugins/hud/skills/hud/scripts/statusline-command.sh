@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hud-statusline-version: 2
+# hud-statusline-version: 3
 # ↑ statusline 스크립트 쌍(command/tokens)의 단일 버전 표식 — install.sh 의
 # 다운그레이드 가드가 비교한다. 어느 한쪽이라도 수정하면 두 파일 모두 +1.
 # 프롬프트마다 실행되는 렌더러이므로 일부 값 누락 시 빈 statusline보다
@@ -104,9 +104,11 @@ BOLD="\033[1m"
 GREEN="\033[32m"
 CYAN="\033[36m"
 YELLOW="\033[33m"
-# 컨텍스트 세그먼트는 기본 magenta(35)가 다크 테마에서 배경과 대비가 낮아
-# 밝은 변형(95) + BOLD 로 띄운다 — 색상 정체성은 유지하면서 가독성만 올린다.
-MAGENTA="\033[95m"
+# 컨텍스트 세그먼트는 밝은 하늘색(256색 39). magenta 계열(35/95)은 빨강+파랑
+# 조합이라 적록색각 이상에서 빨강 성분이 죽어 탁한 회색빛으로 뭉개진다 —
+# 밝기를 올려도 해결되지 않아 색상 자체를 바꿨다. daltonized 팔레트가 빨강/초록
+# 대신 강조축으로 쓰는 파랑·주황 중 파랑. BOLD 는 쓰지 않는다.
+SKYBLUE="\033[38;5;39m"
 RED="\033[31m"
 DIM="\033[2m"
 
@@ -154,7 +156,7 @@ if [ -n "$git_branch" ]; then
 fi
 if [ -n "$ctx_segment" ]; then
     out+="${SEP}"
-    out+="${BOLD}${MAGENTA}${ctx_segment}${RESET}"
+    out+="${SKYBLUE}${ctx_segment}${RESET}"
 fi
 if [ -n "$session_segment" ]; then
     out+="${SEP}"
