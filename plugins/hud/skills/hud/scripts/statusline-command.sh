@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hud-statusline-version: 1
+# hud-statusline-version: 2
 # ↑ statusline 스크립트 쌍(command/tokens)의 단일 버전 표식 — install.sh 의
 # 다운그레이드 가드가 비교한다. 어느 한쪽이라도 수정하면 두 파일 모두 +1.
 # 프롬프트마다 실행되는 렌더러이므로 일부 값 누락 시 빈 statusline보다
@@ -31,8 +31,9 @@ IFS=$'\x1f' read -r model cwd used_pct total_tokens session_pct session_resets_a
   | join("\u001f")
 ')
 
-# 모델 표기 압축: "Opus 4.8 (1M context)" → "Opus 4.8 (1M)" (#1750).
-model=${model// context/}
+# 모델 표기 압축: 괄호 수식어는 통째로 버리고 모델명만 남긴다 (#1750).
+# "Opus 5 (1M context)" → "Opus 5" — 1M 컨텍스트가 기본이 되면서 구분 가치가 없어졌다.
+model=${model%% (*}
 
 abbrev_home() {
     case "$1" in
