@@ -10,7 +10,7 @@ want, each as its own `plugins/<name>/`.
 | **gh-pr-reply**      | `gh-pr-reply`      | Fetch a PR's review comments (humans + bots), apply valid fixes, reply to every thread. |
 | **gh-pr-approve**    | `gh-pr-approve`    | Review a colleague's PR, then approve or request changes and file follow-up issues. |
 | **gh-triage**        | `gh-triage`        | Triage Backlog issues — promote ready ones, enhance with code exploration, split, or ask for clarification. |
-| **hud**              | `hud`              | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
+| **statusline-kit**   | `statusline-kit`   | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
 | **skill-optimizer**  | `skill-optimizer`  | Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts: measure → invariants → plan → five levers (description slim, prose compression, reference split, shell externalization, hook absorption) → verify. Also detects duplicated skill copies and unifies them. |
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
 
@@ -32,7 +32,7 @@ other five plugins have no shared files and are fully independent.
   helper `scripts/setup-board.sh`. Needed by `github-workflow` and `gh-triage`.
 - Optional: `shellcheck` (push-time lint of any shell scripts), `actionlint`
   (workflow lint).
-- `hud`, `skill-optimizer`, and `agent-clinic` have no external dependencies
+- `statusline-kit`, `skill-optimizer`, and `agent-clinic` have no external dependencies
   beyond `bash`.
 
 > **Scope note:** the board functions query `organization(login: …)`, so the
@@ -48,7 +48,7 @@ In Claude Code:
 /plugin install gh-triage@skill
 /plugin install gh-pr-reply@skill
 /plugin install gh-pr-approve@skill
-/plugin install hud@skill
+/plugin install statusline-kit@skill
 /plugin install skill-optimizer@skill
 /plugin install agent-clinic@skill
 ```
@@ -56,8 +56,9 @@ In Claude Code:
 Install only the plugins you want — each is independent. Then reload plugins
 (`/reload-plugins`) if prompted. The skills are invoked as
 `/github-workflow:github-workflow`, `/gh-pr-reply:gh-pr-reply`,
-`/gh-pr-approve:gh-pr-approve`, `/gh-triage:gh-triage`, `/hud:hud`,
-`/skill-optimizer:skill-optimizer`, `/agent-clinic:agent-clinic` — or
+`/gh-pr-approve:gh-pr-approve`, `/gh-triage:gh-triage`,
+`/statusline-kit:statusline-kit`, `/skill-optimizer:skill-optimizer`,
+`/agent-clinic:agent-clinic` — or
 auto-trigger from natural-language requests (see each skill's description).
 
 ## Set up the board
@@ -116,19 +117,19 @@ and an optional **local CI gate**. Builds/tests are project-specific, so the gat
 is pluggable — set `CLAUDE_LOCAL_CI_CMD` or add `.github-workflow/local-ci.sh`.
 See [`docs/configuration.md`](plugins/github-workflow/docs/configuration.md).
 
-## hud — statusline setup
+## statusline-kit — statusline setup
 
 Installs the statusline (model · cwd/branch · context usage · session token
 totals) into `~/.claude/`, so a new machine or container gets the exact same
 setup in one shot:
 
 ```text
-/hud:hud
+/statusline-kit:statusline-kit
 ```
 
 or just ask "새 환경에 statusline 셋업해줘" / "set up the statusline here". See
-[`plugins/hud/skills/hud/SKILL.md`](plugins/hud/skills/hud/SKILL.md) for what
-it installs and how.
+[`plugins/statusline-kit/skills/statusline-kit/SKILL.md`](plugins/statusline-kit/skills/statusline-kit/SKILL.md)
+for what it installs and how.
 
 ## Repository layout
 
@@ -160,7 +161,7 @@ plugins/
 │   └── docs/github-integration.md            # symlink → ../github-workflow/docs/…
 ├── gh-pr-reply/   (plugin.json + skills/gh-pr-reply/{SKILL.md, references/})
 ├── gh-pr-approve/ (plugin.json + skills/gh-pr-approve/{SKILL.md, references/})
-├── hud/           (plugin.json + skills/hud/{SKILL.md, scripts/})
+├── statusline-kit/ (plugin.json + skills/statusline-kit/{SKILL.md, scripts/})
 ├── skill-optimizer/ (plugin.json + skills/skill-optimizer/SKILL.md)
 └── agent-clinic/  (plugin.json + skills/agent-clinic/{SKILL.md, references/})
 ```
@@ -182,7 +183,7 @@ cd plugins/github-workflow/scripts
 bash test-github-workflow.sh   # pure-helper unit tests (no network)
 shellcheck -x -S warning github-workflow.sh setup-board.sh
 
-bash ../../hud/skills/hud/scripts/test-install.sh   # hud install script (isolated tmp HOME)
+bash ../../statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
 ```
 
 ## Limitations
