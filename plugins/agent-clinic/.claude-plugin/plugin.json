@@ -1,0 +1,16 @@
+{
+  "name": "agent-clinic",
+  "version": "1.0.0",
+  "description": "Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "repo-hygiene",
+    "documentation",
+    "context-diet"
+  ]
+}
