@@ -26,8 +26,8 @@
       "description": "Review a colleague's GitHub PR, then approve it or request changes and file follow-up issues."
     },
     {
-      "name": "hud",
-      "source": "./plugins/hud",
+      "name": "statusline-kit",
+      "source": "./plugins/statusline-kit",
       "description": "Install a Claude Code statusline (model, cwd/branch, context usage, session token totals) into a fresh environment."
     },
     {
@@ -42,6 +42,7 @@
     }
   ],
   "renames": {
-    "skill": null
+    "skill": null,
+    "hud": "statusline-kit"
   }
 }
