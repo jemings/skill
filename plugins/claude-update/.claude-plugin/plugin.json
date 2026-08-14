@@ -1,0 +1,17 @@
+{
+  "name": "claude-update",
+  "version": "1.0.0",
+  "description": "Recover claude-code's native auto-update when it fails with a download timeout (e.g. behind a slow corporate proxy) by fetching the release manifest, downloading the verified binary with a generous timeout, and swapping it in.",
+  "author": {
+    "name": "jemings"
+  },
+  "homepage": "https://github.com/jemings/skill",
+  "repository": "https://github.com/jemings/skill",
+  "license": "Apache-2.0",
+  "keywords": [
+    "claude-code",
+    "update",
+    "proxy",
+    "native-install"
+  ]
+}

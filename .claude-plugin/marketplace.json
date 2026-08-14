@@ -39,6 +39,11 @@
       "name": "agent-clinic",
       "source": "./plugins/agent-clinic",
       "description": "Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts."
+    },
+    {
+      "name": "claude-update",
+      "source": "./plugins/claude-update",
+      "description": "Recover claude-code's native auto-update when it fails with a download timeout (e.g. behind a slow corporate proxy) by fetching the release manifest, downloading the verified binary with a generous timeout, and swapping it in."
     }
   ],
   "renames": {

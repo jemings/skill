@@ -13,12 +13,13 @@ want, each as its own `plugins/<name>/`.
 | **statusline-kit**   | `statusline-kit`   | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
 | **skill-optimizer**  | `skill-optimizer`  | Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts: measure → invariants → plan → five levers (description slim, prose compression, reference split, shell externalization, hook absorption) → verify. Also detects duplicated skill copies and unifies them. |
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
+| **claude-update**    | `claude-update`    | Recover `claude update` when it fails with a download timeout (e.g. a slow corporate proxy): fetch the release manifest, download the checksummed binary with a generous timeout, and swap it into place. |
 
 `github-workflow` and `gh-triage` both drive the same GitHub Project board and
 share one function library (`scripts/github-workflow.sh`) — `gh-triage` links
 to it (see [Repository layout](#repository-layout)) so it stays installable
 on its own, but in practice the two are normally installed together. The
-other five plugins have no shared files and are fully independent.
+other six plugins have no shared files and are fully independent.
 
 ## Prerequisites
 
@@ -34,6 +35,7 @@ other five plugins have no shared files and are fully independent.
   (workflow lint).
 - `statusline-kit`, `skill-optimizer`, and `agent-clinic` have no external dependencies
   beyond `bash`.
+- `claude-update` needs `curl` and `sha256sum` (or macOS's `shasum`), no `jq`.
 
 > **Scope note:** the board functions query `organization(login: …)`, so the
 > Project must be **organization-owned**, not user-owned. See [Limitations](#limitations).
@@ -51,6 +53,7 @@ In Claude Code:
 /plugin install statusline-kit@skill
 /plugin install skill-optimizer@skill
 /plugin install agent-clinic@skill
+/plugin install claude-update@skill
 ```
 
 Install only the plugins you want — each is independent. Then reload plugins
@@ -58,7 +61,7 @@ Install only the plugins you want — each is independent. Then reload plugins
 `/github-workflow:github-workflow`, `/gh-pr-reply:gh-pr-reply`,
 `/gh-pr-approve:gh-pr-approve`, `/gh-triage:gh-triage`,
 `/statusline-kit:statusline-kit`, `/skill-optimizer:skill-optimizer`,
-`/agent-clinic:agent-clinic` — or
+`/agent-clinic:agent-clinic`, `/claude-update:claude-update` — or
 auto-trigger from natural-language requests (see each skill's description).
 
 ## Set up the board
@@ -163,7 +166,8 @@ plugins/
 ├── gh-pr-approve/ (plugin.json + skills/gh-pr-approve/{SKILL.md, references/})
 ├── statusline-kit/ (plugin.json + skills/statusline-kit/{SKILL.md, scripts/})
 ├── skill-optimizer/ (plugin.json + skills/skill-optimizer/SKILL.md)
-└── agent-clinic/  (plugin.json + skills/agent-clinic/{SKILL.md, references/})
+├── agent-clinic/  (plugin.json + skills/agent-clinic/{SKILL.md, references/})
+└── claude-update/ (plugin.json + skills/claude-update/{SKILL.md, scripts/})
 ```
 
 `gh-triage`'s two symlinks point at `github-workflow`'s copies of the shared
