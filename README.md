@@ -13,7 +13,7 @@ want, each as its own `plugins/<name>/`.
 | **statusline-kit**   | `statusline-kit`   | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
 | **skill-optimizer**  | `skill-optimizer`  | Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts: measure → invariants → plan → five levers (description slim, prose compression, reference split, shell externalization, hook absorption) → verify. Also detects duplicated skill copies and unifies them. |
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
-| **claude-update**    | `claude-update`    | Recover `claude update` when it fails with a download timeout (e.g. a slow corporate proxy): fetch the release manifest, download the checksummed binary with a generous timeout, and swap it into place. |
+| **claude-update**    | `claude-update`    | Install the latest native release directly, skipping `claude update`'s fixed download deadline that fails on a slow proxy: manifest lookup, resumable checksum-verified download, atomic symlink swap. |
 
 `github-workflow` and `gh-triage` both drive the same GitHub Project board and
 share one function library (`scripts/github-workflow.sh`) — `gh-triage` links
