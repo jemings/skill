@@ -1,7 +1,7 @@
 {
   "name": "claude-update",
-  "version": "1.0.0",
-  "description": "Recover claude-code's native auto-update when it fails with a download timeout (e.g. behind a slow corporate proxy) by fetching the release manifest, downloading the verified binary with a generous timeout, and swapping it in.",
+  "version": "1.1.0",
+  "description": "Install the latest claude-code native release directly, bypassing the built-in updater's fixed download deadline that fails on slow links: manifest lookup, resumable checksum-verified download, atomic symlink swap.",
   "author": {
     "name": "jemings"
   },
