@@ -18,6 +18,9 @@ STALL_TIME="${CLAUDE_UPDATE_STALL_TIME:-120}"              # 그 상태가 이�
 MAX_STALLS="${CLAUDE_UPDATE_RETRIES:-5}"                   # 진전 없는 시도가 연속 이만큼이면 포기
 MAX_ATTEMPTS="${CLAUDE_UPDATE_MAX_ATTEMPTS:-30}"           # 폭주 방지용 총 시도 상한
 RETRY_DELAY="${CLAUDE_UPDATE_RETRY_DELAY:-5}"              # seconds
+CONNECT_TIMEOUT="${CLAUDE_UPDATE_CONNECT_TIMEOUT:-60}"     # seconds, 프록시 핸드셰이크까지 감안
+META_MAX_TIME="${CLAUDE_UPDATE_META_MAX_TIME:-60}"         # seconds, latest/manifest.json 한 번당
+META_RETRIES="${CLAUDE_UPDATE_META_RETRIES:-3}"
 PROGRESS_INTERVAL="${CLAUDE_UPDATE_PROGRESS_INTERVAL:-30}" # seconds
 CACHE_DIR="${CLAUDE_UPDATE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/claude-update}"
 
@@ -42,6 +45,26 @@ manifest_field() {
     flag && /}/ { exit }
     flag { print }
   ' "$manifest_file" | grep -oE "\"$field\": *\"?[^\",}]+\"?" | sed -E 's/^"[^"]+": *"?([^",}]+)"?$/\1/'
+}
+
+# latest 와 manifest.json 은 몇 KB 짜리지만, 느린 프록시에서는 이것도 실패한다.
+# 여기서 죽으면 300MB 다운로드는 시작조차 못 하므로 재시도를 붙인다 — 작고
+# 멱등한 GET 이라 처음부터 다시 받아도 손해가 없다.
+fetch_meta() {
+  local url="$1" out="${2:-}" attempt=0 rc=0
+  while :; do
+    attempt=$((attempt + 1))
+    rc=0
+    if [[ -n "$out" ]]; then
+      curl -fsS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$META_MAX_TIME" -o "$out" "$url" || rc=$?
+    else
+      curl -fsS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$META_MAX_TIME" "$url" || rc=$?
+    fi
+    [[ "$rc" -eq 0 ]] && return 0
+    [[ "$attempt" -ge "$META_RETRIES" ]] && return "$rc"
+    echo "   요청 실패 (curl exit $rc) — ${RETRY_DELAY}초 뒤 재시도 ($attempt/$META_RETRIES)" >&2
+    sleep "$RETRY_DELAY"
+  done
 }
 
 # curl's own meter is a \r-overwritten single line — useless in a log file
@@ -92,7 +115,7 @@ download_attempt() {
   local url="$1" rc=0
   local -a args=(
     -fL --no-progress-meter -C - -o "$part"
-    --connect-timeout 30
+    --connect-timeout "$CONNECT_TIMEOUT"
     --speed-limit "$STALL_SPEED" --speed-time "$STALL_TIME"
   )
   [[ "$DOWNLOAD_MAX_TIME" -gt 0 ]] && args+=(--max-time "$DOWNLOAD_MAX_TIME")
@@ -172,7 +195,7 @@ echo "현재 버전: $current_version (native, $versions_dir)"
 echo
 echo "1) 최신 버전 확인..."
 
-latest_version="$(curl -fsS --max-time 15 "$RELEASES_BASE/latest")"
+latest_version="$(fetch_meta "$RELEASES_BASE/latest")"
 echo "최신 버전: $latest_version"
 
 if [[ "$latest_version" == "$current_version" && "${CLAUDE_UPDATE_FORCE:-}" != "1" ]]; then
@@ -219,7 +242,7 @@ watcher=""
 resumed=0 # 어느 시도든 0이 아닌 지점에서 이어받았으면 1
 trap 'rm -f "$manifest"; [[ -n "$watcher" ]] && kill "$watcher" 2>/dev/null; true' EXIT
 
-curl -fsS --max-time 15 -o "$manifest" "$RELEASES_BASE/$latest_version/manifest.json"
+fetch_meta "$RELEASES_BASE/$latest_version/manifest.json" "$manifest"
 
 # `|| true` — 필드가 없으면 grep 이 1을 내고 set -e 가 조용히 죽인다.
 # 아래 안내 메시지까지 살아서 도달하게 한다.

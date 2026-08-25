@@ -66,9 +66,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/claude-update/scripts/update.sh"
 - **재시도는 curl 이 아니라 스크립트가 돌린다.** curl 의 `--retry` 는 재시도할 때
   `-C -` 의 이어받기 지점을 다시 계산하지 않아, 이미 받은 300MB 를 버리고 0 부터
   다시 받으며 출력 파일까지 자른다. 그래서 매 시도를 새 curl 로 띄운다.
+- **작은 요청도 재시도한다.** `latest`·`manifest.json` 은 몇 KB 지만 느린
+  프록시에서는 이것도 실패한다. 여기서 죽으면 300MB 다운로드는 시작조차 못
+  하므로 한 번당 60초·3회까지 다시 시도한다.
 - **총 시간 제한을 두지 않는다.** 진행 중인 전송을 총 시간으로 끊는 것이 바로
   이 스킬이 우회하려는 실패 방식이다. 대신 120초 동안 1KB/s 미만이면 그 시도만
   끊는다. 굳이 상한이 필요하면 `CLAUDE_UPDATE_MAX_TIME=<초>`.
+  정체 감지는 마감이 아니라 죽은 연결을 걷어차는 신호다 — 끊어도 받아 둔
+  지점에서 이어받으므로, 이 값은 늘리는 쪽이 아니라 줄이는 쪽이 회복이 빠르다.
 - **네이티브 설치가 아니면 중단한다.** `claude` 가 심링크가 아니거나,
   레이아웃이 다르면서 `claude doctor` 의 install method 도 `native` 가
   아니면(npm/homebrew 등) 아무것도 하지 않는다 — 해당 패키지 매니저로 갱신해야 한다.
@@ -78,7 +83,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/claude-update/scripts/update.sh"
   다시 받아 본 뒤에 판단한다.
 - 설치 후에도 **실행 중인 세션은 계속 이전 버전**이다 — 새로 띄우는
   `claude` 부터 적용된다.
-- 환경변수: `CLAUDE_UPDATE_MAX_TIME`(0 = 무제한), `CLAUDE_UPDATE_STALL_TIME`(120),
+- 환경변수: `CLAUDE_UPDATE_MAX_TIME`(0 = 무제한), `CLAUDE_UPDATE_CONNECT_TIMEOUT`(60),
+  `CLAUDE_UPDATE_META_MAX_TIME`(60), `CLAUDE_UPDATE_META_RETRIES`(3),
+  `CLAUDE_UPDATE_STALL_TIME`(120),
   `CLAUDE_UPDATE_STALL_SPEED`(1024), `CLAUDE_UPDATE_RETRIES`(5 = 진전 없는 시도
   연속 허용 횟수), `CLAUDE_UPDATE_MAX_ATTEMPTS`(30), `CLAUDE_UPDATE_RETRY_DELAY`(5),
   `CLAUDE_UPDATE_PROGRESS_INTERVAL`(30), `CLAUDE_UPDATE_CACHE_DIR`,
