@@ -3,12 +3,21 @@
 # built-in updater. `claude update` puts a fixed total deadline on a ~300MB
 # download, so on a slow link (corporate proxy) it fails no matter how much
 # progress it made — that path is skipped entirely here. Instead: read the
-# published manifest, fetch the binary with a generous timeout and resume,
-# verify its SHA256, and swap the symlink the way the native updater would.
+# published manifest, fetch the binary with no total deadline (only a stall
+# guard) and real resume, verify its SHA256, and swap the symlink the way the
+# native updater would.
 set -euo pipefail
 
 RELEASES_BASE="${CLAUDE_UPDATE_RELEASES_BASE:-https://downloads.claude.ai/claude-code-releases}"
-DOWNLOAD_MAX_TIME="${CLAUDE_UPDATE_MAX_TIME:-900}"       # seconds, per attempt
+# 0 = 시도당 총 시간 제한 없음. 이 스크립트가 존재하는 이유가 "진행 중인
+# 전송을 총 시간으로 끊는 것"이므로 기본값은 무제한이다. 대신 아래 정체
+# 감지로 죽은 연결만 끊는다.
+DOWNLOAD_MAX_TIME="${CLAUDE_UPDATE_MAX_TIME:-0}"           # seconds, per attempt (0 = unlimited)
+STALL_SPEED="${CLAUDE_UPDATE_STALL_SPEED:-1024}"           # bytes/s 미만이면 정체로 본다
+STALL_TIME="${CLAUDE_UPDATE_STALL_TIME:-120}"              # 그 상태가 이만큼 이어지면 시도를 끊는다
+MAX_STALLS="${CLAUDE_UPDATE_RETRIES:-5}"                   # 진전 없는 시도가 연속 이만큼이면 포기
+MAX_ATTEMPTS="${CLAUDE_UPDATE_MAX_ATTEMPTS:-30}"           # 폭주 방지용 총 시도 상한
+RETRY_DELAY="${CLAUDE_UPDATE_RETRY_DELAY:-5}"              # seconds
 PROGRESS_INTERVAL="${CLAUDE_UPDATE_PROGRESS_INTERVAL:-30}" # seconds
 CACHE_DIR="${CLAUDE_UPDATE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/claude-update}"
 
@@ -37,16 +46,98 @@ manifest_field() {
 
 # curl's own meter is a \r-overwritten single line — useless in a log file
 # that gets tailed, which is how a backgrounded run is read. Print one line
-# per interval instead.
+# per interval instead, with the recent rate and an ETA: on a slow link the
+# only question worth answering from a tail is "will this finish, and when".
 watch_progress() {
-  local file="$1" total="$2" start="$SECONDS" now pct
+  local file="$1" total="$2" start="$SECONDS"
+  local prev prev_time now elapsed span delta rate size_part rate_part eta_part
+  prev="$(file_size "$file")"
+  prev_time="$SECONDS"
   while :; do
     sleep "$PROGRESS_INTERVAL"
     now="$(file_size "$file")"
-    if [[ "$total" -gt 0 ]]; then pct=$((now * 100 / total)); else pct=0; fi
-    printf '   %3d%%  %sMB / %sMB  경과 %ss\n' \
-      "$pct" "$((now / 1048576))" "$((total / 1048576))" "$((SECONDS - start))"
+    elapsed=$((SECONDS - start))
+    span=$((SECONDS - prev_time))
+    [[ "$span" -lt 1 ]] && span=1
+    delta=$((now - prev))
+    [[ "$delta" -lt 0 ]] && delta=0
+    rate=$((delta / span))
+    prev="$now"
+    prev_time="$SECONDS"
+
+    if [[ "$total" -gt 0 ]]; then
+      size_part="$(printf '%3d%%  %sMB / %sMB' \
+        "$((now * 100 / total))" "$((now / 1048576))" "$((total / 1048576))")"
+    else
+      size_part="$(printf '      %sMB' "$((now / 1048576))")"
+    fi
+    if [[ "$rate" -gt 0 ]]; then
+      rate_part="$(printf '%d.%dMB/s' "$((rate / 1048576))" "$(((rate * 10 / 1048576) % 10))")"
+    else
+      rate_part='정체'
+    fi
+    eta_part=''
+    if [[ "$total" -gt 0 && "$rate" -gt 0 && "$now" -lt "$total" ]]; then
+      eta_part="$(printf '남은 ~%d분' "$((((total - now) / rate + 59) / 60))")"
+    fi
+    printf '   %s  %s  %s  경과 %ss\n' "$size_part" "$rate_part" "$eta_part" "$elapsed"
   done
+}
+
+# 한 번의 curl 호출. curl 자체 --retry 는 쓰지 않는다 — 재시도할 때 -C - 의
+# 이어받기 지점을 다시 계산하지 않아서 이미 받은 300MB를 버리고 0부터
+# 다시 받는다(출력 파일도 잘린다). 재시도는 아래 루프가 하고, 매 시도가
+# 새 curl 이므로 그때마다 부분 파일 크기에서 이어받는다.
+download_attempt() {
+  local url="$1" rc=0
+  local -a args=(
+    -fL --no-progress-meter -C - -o "$part"
+    --connect-timeout 30
+    --speed-limit "$STALL_SPEED" --speed-time "$STALL_TIME"
+  )
+  [[ "$DOWNLOAD_MAX_TIME" -gt 0 ]] && args+=(--max-time "$DOWNLOAD_MAX_TIME")
+  curl "${args[@]}" "$url" || rc=$?
+  return "$rc"
+}
+
+# 정체된 시도만 재시도 횟수를 소모한다 — 느린 프록시에서 끊겼다 이어받기를
+# 반복하며 조금씩 전진하는 것은 실패가 아니라 정상 경로다.
+download_to_part() {
+  local url="$1" attempt=0 stalled=0 rc=0 before after
+  watch_progress "$part" "$size" &
+  watcher=$!
+  while :; do
+    attempt=$((attempt + 1))
+    before="$(file_size "$part")"
+    [[ "$before" -gt 0 ]] && resumed=1
+    rc=0
+    download_attempt "$url" || rc=$?
+    [[ "$rc" -eq 0 ]] && break
+
+    after="$(file_size "$part")"
+    if [[ "$rc" -eq 33 ]]; then
+      echo "   서버가 이어받기(Range)를 거부했습니다 — 처음부터 다시 받습니다."
+      rm -f "$part"
+      after=0
+    fi
+
+    if [[ "$after" -gt "$before" ]]; then
+      stalled=0
+      echo "   시도 $attempt 끊김 (curl exit $rc) — $((after / 1048576))MB 지점까지 받았습니다. 이어받아 재시도합니다."
+    else
+      stalled=$((stalled + 1))
+      echo "   시도 $attempt 실패 (curl exit $rc) — 진전 없음 ($stalled/$MAX_STALLS)."
+      [[ "$stalled" -ge "$MAX_STALLS" ]] && break
+    fi
+    if [[ "$attempt" -ge "$MAX_ATTEMPTS" ]]; then
+      echo "   총 시도 상한($MAX_ATTEMPTS)에 도달했습니다."
+      break
+    fi
+    sleep "$RETRY_DELAY"
+  done
+  { kill "$watcher" && wait "$watcher"; } 2>/dev/null || true
+  watcher=""
+  return "$rc"
 }
 
 claude_bin="$(command -v claude || true)"
@@ -125,6 +216,7 @@ echo "플랫폼: $plat"
 
 manifest="$(mktemp)"
 watcher=""
+resumed=0 # 어느 시도든 0이 아닌 지점에서 이어받았으면 1
 trap 'rm -f "$manifest"; [[ -n "$watcher" ]] && kill "$watcher" 2>/dev/null; true' EXIT
 
 curl -fsS --max-time 15 -o "$manifest" "$RELEASES_BASE/$latest_version/manifest.json"
@@ -148,15 +240,24 @@ echo
 # 끊길 때마다 300MB를 처음부터 다시 받지 않기 위해서다.
 mkdir -p "$CACHE_DIR"
 part="$CACHE_DIR/$latest_version-$plat"
+url="$RELEASES_BASE/$latest_version/$plat/$binary_name"
 
-echo "2) 다운로드 (최대 ${DOWNLOAD_MAX_TIME}초/시도, ${PROGRESS_INTERVAL}초마다 진행률)..."
+if [[ "$DOWNLOAD_MAX_TIME" -gt 0 ]]; then
+  attempt_limit="최대 ${DOWNLOAD_MAX_TIME}초/시도"
+else
+  attempt_limit="시간 제한 없음, ${STALL_TIME}초 정체 시 재시도"
+fi
+echo "2) 다운로드 ($attempt_limit, ${PROGRESS_INTERVAL}초마다 진행률)..."
+
 have=0
 [[ -f "$part" ]] && have="$(file_size "$part")"
-if [[ "$have" -gt 0 && "$size" -gt 0 && "$have" -ge "$size" ]]; then
+# 크기를 알면 완전한지 먼저 보고, 모르면 남아 있는 조각의 체크섬을 그냥
+# 대조한다 — 완성된 파일에 -C - 로 이어받기를 걸면 416 으로 실패한다.
+if [[ "$have" -gt 0 ]] && [[ "$size" -eq 0 || "$have" -ge "$size" ]]; then
   if [[ "$(sha256_of "$part")" == "$checksum" ]]; then
     echo "   캐시에 완전한 파일이 있습니다 — 다운로드를 건너뜁니다."
     have=-1
-  else
+  elif [[ "$size" -gt 0 ]]; then
     echo "   캐시 파일 체크섬이 맞지 않아 삭제하고 새로 받습니다."
     rm -f "$part"
     have=0
@@ -169,16 +270,8 @@ if [[ "$have" -ge 0 ]]; then
   elif [[ "$have" -gt 0 ]]; then
     echo "   이어받기: $((have / 1048576))MB 지점부터"
   fi
-  watch_progress "$part" "$size" &
-  watcher=$!
   rc=0
-  curl -fL --no-progress-meter -C - -o "$part" \
-    --max-time "$DOWNLOAD_MAX_TIME" \
-    --speed-limit 1024 --speed-time 120 \
-    --retry 5 --retry-delay 5 \
-    "$RELEASES_BASE/$latest_version/$plat/$binary_name" || rc=$?
-  { kill "$watcher" && wait "$watcher"; } 2>/dev/null || true
-  watcher=""
+  download_to_part "$url" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     echo "다운로드 실패 (curl exit $rc)." >&2
     echo "받은 부분은 $part 에 남겨 뒀습니다 — 다시 실행하면 이어받습니다." >&2
@@ -189,6 +282,21 @@ fi
 echo
 echo "3) 체크섬 검증..."
 actual_checksum="$(sha256_of "$part")"
+# 이어받은 파일이 틀렸다면 앞부분(이전 실행분·Range 를 무시한 프록시 응답)이
+# 의심스럽다. 사용자에게 300MB 재다운로드를 수동으로 시키지 말고 여기서
+# 한 번은 처음부터 다시 받아 본다.
+if [[ "$actual_checksum" != "$checksum" && "$resumed" -eq 1 ]]; then
+  echo "   체크섬 불일치 — 이어받은 조각이 손상된 것으로 보입니다. 처음부터 다시 받습니다."
+  rm -f "$part"
+  resumed=0
+  rc=0
+  download_to_part "$url" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "다운로드 실패 (curl exit $rc)." >&2
+    exit "$rc"
+  fi
+  actual_checksum="$(sha256_of "$part")"
+fi
 if [[ "$actual_checksum" != "$checksum" ]]; then
   echo "체크섬 불일치! 기대값=$checksum 실제값=$actual_checksum" >&2
   echo "손상된 파일을 삭제합니다 ($part) — 다시 실행하면 새로 받습니다." >&2
