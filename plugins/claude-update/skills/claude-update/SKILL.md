@@ -25,9 +25,11 @@ allowed-tools: Bash
 2. `.../claude-code-releases/latest` 로 최신 버전을 확인하고, 이미 최신이면
    즉시 끝낸다 (같은 버전 재설치는 `CLAUDE_UPDATE_FORCE=1`).
 3. `<version>/manifest.json` 에서 플랫폼별 파일명·SHA256·크기를 읽는다.
-4. curl 로 직접 받는다 — 시도당 900초, 5회 재시도, `-C -` 이어받기,
-   30초마다 진행률 한 줄.
-5. SHA256 을 검증한다. 불일치면 받은 파일을 지우고 설치하지 않는다.
+4. curl 로 직접 받는다 — 총 시간 제한 없이, 120초 넘게 정체한 시도만 끊고
+   받아 둔 지점부터 이어받아 재시도한다(진전이 있었던 시도는 재시도 한도를
+   소모하지 않는다). 30초마다 진행률·속도·예상 잔여 시간을 한 줄씩 남긴다.
+5. SHA256 을 검증한다. 이어받은 파일이 불일치하면 한 번은 처음부터 다시 받아
+   보고, 그래도 다르면 지우고 설치하지 않는다.
 6. `versions/<latest>` 에 원자적으로 배치(임시파일 → `mv`)한 뒤 심링크를
    전환한다 — 실행 중인 프로세스의 바이너리를 덮어쓰지 않는다.
 
@@ -44,20 +46,40 @@ Windows 는 다루지 않는다.
 bash "${CLAUDE_PLUGIN_ROOT}/skills/claude-update/scripts/update.sh"
 ```
 
-중간 확인이 필요하면 로그 파일을 `tail` 한다 — 진행률이 30초마다 한 줄씩
-쌓인다 (curl 자체 미터는 껐다. `\r` 로 덮어쓰는 한 줄이라 로그에서 못 읽는다).
+중간 확인이 필요하면 로그 파일을 `tail` 한다 — 30초마다 한 줄씩 쌓인다
+(curl 자체 미터는 껐다. `\r` 로 덮어쓰는 한 줄이라 로그에서 못 읽는다).
+
+```
+    55%  205MB / 373MB  0.4MB/s  남은 ~7분  경과 450s
+```
+
+속도·예상 잔여 시간이 함께 나오므로, 끝날 전송인지 정체된 전송인지를
+그 한 줄로 판단한다 — `정체` 가 이어지면 곧 그 시도를 끊고 이어받아
+재시도한다.
 
 ## Notes
 
-- **중단돼도 이어받는다.** 받다 만 조각은 `~/.cache/claude-update/` 에 남고,
-  다시 실행하면 그 지점부터 이어받는다 (릴리스 CDN 이 Range 지원). 설치가
-  끝나면 지운다.
+- **중단돼도 이어받는다.** 프록시가 전송을 끊으면 실행 중에 그 지점부터
+  이어받아 재시도하고, 스크립트째 죽어도 받다 만 조각이
+  `~/.cache/claude-update/` 에 남아 다음 실행이 이어받는다 (릴리스 CDN 이
+  Range 지원). 설치가 끝나면 지운다.
+- **재시도는 curl 이 아니라 스크립트가 돌린다.** curl 의 `--retry` 는 재시도할 때
+  `-C -` 의 이어받기 지점을 다시 계산하지 않아, 이미 받은 300MB 를 버리고 0 부터
+  다시 받으며 출력 파일까지 자른다. 그래서 매 시도를 새 curl 로 띄운다.
+- **총 시간 제한을 두지 않는다.** 진행 중인 전송을 총 시간으로 끊는 것이 바로
+  이 스킬이 우회하려는 실패 방식이다. 대신 120초 동안 1KB/s 미만이면 그 시도만
+  끊는다. 굳이 상한이 필요하면 `CLAUDE_UPDATE_MAX_TIME=<초>`.
 - **네이티브 설치가 아니면 중단한다.** `claude` 가 심링크가 아니거나,
   레이아웃이 다르면서 `claude doctor` 의 install method 도 `native` 가
   아니면(npm/homebrew 등) 아무것도 하지 않는다 — 해당 패키지 매니저로 갱신해야 한다.
 - **체크섬 불일치 시 설치하지 않는다.** manifest 의 SHA256 과 다르면
-  `versions/` 에 배치하지 않고 에러로 종료한다.
+  `versions/` 에 배치하지 않고 에러로 종료한다. 이어받은 파일이 틀렸을 때는
+  (이전 실행분이 상했거나 프록시가 Range 를 무시한 경우) 한 번은 스스로 처음부터
+  다시 받아 본 뒤에 판단한다.
 - 설치 후에도 **실행 중인 세션은 계속 이전 버전**이다 — 새로 띄우는
   `claude` 부터 적용된다.
-- 환경변수: `CLAUDE_UPDATE_MAX_TIME`(900), `CLAUDE_UPDATE_PROGRESS_INTERVAL`(30),
-  `CLAUDE_UPDATE_CACHE_DIR`, `CLAUDE_UPDATE_FORCE`, `CLAUDE_UPDATE_RELEASES_BASE`.
+- 환경변수: `CLAUDE_UPDATE_MAX_TIME`(0 = 무제한), `CLAUDE_UPDATE_STALL_TIME`(120),
+  `CLAUDE_UPDATE_STALL_SPEED`(1024), `CLAUDE_UPDATE_RETRIES`(5 = 진전 없는 시도
+  연속 허용 횟수), `CLAUDE_UPDATE_MAX_ATTEMPTS`(30), `CLAUDE_UPDATE_RETRY_DELAY`(5),
+  `CLAUDE_UPDATE_PROGRESS_INTERVAL`(30), `CLAUDE_UPDATE_CACHE_DIR`,
+  `CLAUDE_UPDATE_FORCE`, `CLAUDE_UPDATE_RELEASES_BASE`.
