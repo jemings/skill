@@ -1,0 +1,150 @@
+---
+name: claude-delegation
+license: Apache-2.0
+description: >-
+  Delegate a GitHub issue to Claude Code CLI end to end: implement, open a
+  PR, adversarially review it yourself, and loop re-delegation until every
+  review comment is resolved. Use when the user asks "이슈 #N 맡겼으니 PR까지
+  만들고 리뷰까지 해", "delegate issue #N to Claude", "Claude에게 위임해서
+  PR 만들어", or wants an issue carried to a reviewed, verified PR without
+  doing the implementation themselves.
+allowed-tools: Bash, Read, Grep, Glob
+---
+
+# claude-delegation — Issue → Claude Code → PR → Adversarial Review Loop
+
+End-to-end: take a GitHub issue, delegate implementation to the Claude Code
+CLI, verify the PR really exists, review it adversarially yourself, and loop
+re-delegation until all review comments are resolved. **Completion = all
+comments closed with independent verification on the final head SHA**, not
+"PR exists".
+
+## When to Use
+
+- "이슈 #N 맡겼으니 PR까지 만들고 리뷰까지 해" — issue delegation with review loop.
+- Any request to delegate implementation to Claude Code and gate it on your own adversarial review.
+
+## Procedure
+
+### Step 1: Read the live issue
+
+```bash
+gh issue view <N> --json title,body,state,labels,comments
+gh pr list --search "#<N>" --state all   # duplicate sweep
+```
+
+The body is a snapshot from filing time; newest comments carry the live
+state. Done when the requested behavior, non-goals, and any thread questions
+are known.
+
+### Step 2: Delegate to Claude Code (generous limits — never let it get killed)
+
+Run in a **background process** (e.g. `terminal(background=true,
+notify_on_complete=true)`), not foreground with a timeout — foreground
+timeouts kill long delegations mid-flight.
+
+**Permissions: prefer scoped `--allowedTools` over
+`--dangerously-skip-permissions`.** Print mode (`-p`) is non-interactive:
+unapproved tools simply fail rather than prompt, so autonomous work needs
+pre-approved permissions — but that can be an allowlist, not a blanket
+bypass:
+
+```bash
+claude -p "$(cat /tmp/task.md)" \
+  --allowedTools 'Read' 'Edit' 'Write' 'Bash(git *)' 'Bash(gh *)' 'Bash(uv run pytest *)' 'Bash(bun run *)' \
+  --output-format json --max-turns 200 --max-budget-usd 25 --effort high \
+  > /tmp/result.json 2>/tmp/stderr.log; echo "EXIT=$?" >> /tmp/stderr.log
+```
+
+Rules of thumb:
+
+- Default to `--allowedTools` scoped to what the task needs (git, gh, test
+  runner, formatter). Least privilege. `rm -rf`, network installs etc.
+  stay blocked.
+- Reach for `--dangerously-skip-permissions` only when the task legitimately
+  needs arbitrary commands (unknown build tooling, network installs) and the
+  workdir is disposable/isolated.
+- Middle ground: `--permission-mode acceptEdits` (auto-accept file edits
+  only; bash still needs explicit allows).
+- Generous ceilings so it never dies mid-task: `--max-turns 200`,
+  `--max-budget-usd 25`, `--effort high`.
+
+**Task file** (`/tmp/task.md`) must be self-contained: issue summary,
+branch/commit/PR steps, quality gates to run, scope constraints ("no
+out-of-scope refactors", "if blocked, print what blocked you and stop"),
+and required final output (PR URL, head SHA, files). Feeding everything it
+needs up front also reduces the tool surface Claude needs — fewer surprises
+under an allowlist.
+
+**If interrupted:** do NOT just do it yourself. Diagnose root cause from
+`result.json` `subtype` (`error_max_turns`, permission denials),
+`stderr.log`, cost/turns — then fix the config (raise turns/budget, extend
+the allowlist) and rerun.
+
+### Step 3: Verify the PR yourself — never trust the child's report
+
+```bash
+gh pr view <N> --json number,url,state,headRefOid,baseRefName,files
+gh pr diff <N> > /tmp/pr.diff   # read it fully
+```
+
+Independently run the gates in a clean clone: tests, the guard script,
+plus a **sabotage check** — temporarily break the thing the guard/tests
+protect (e.g. mutate a revision id), confirm FAIL + exit 1, restore.
+A test that passes with and without the fix proves nothing; sabotage is
+the only proof a guard actually bites.
+
+### Step 4: Adversarial review → inline comments via one atomic API call
+
+Write the review payload to a JSON file (avoids heredoc/backtick shell
+mangling), fill `commit_id` with the real head SHA, then:
+
+```bash
+gh api repos/<owner>/<repo>/pulls/<N>/reviews --input /tmp/review.json
+```
+
+Include per-file inline comments with exact new-file line numbers,
+verified against full file context, not just the diff. Review checklist:
+correctness/edge cases, security, scope discipline ("every changed line
+traces to the issue"), sibling call sites of the same bug, missing tests,
+fail-open vs fail-closed direction.
+
+**Note:** GitHub rejects APPROVE on your own PR (422 "Can not approve your
+own pull request") when the same token authored it — use
+`event: "COMMENT"` for the verdict in that case.
+
+### Step 5: Re-delegation loop until every comment is resolved
+
+Loop Steps 2–4 on the SAME PR branch until each review comment is either
+fixed or explicitly justified as no-change (with reasoning). Then post a
+re-review confirming each comment resolved/closed.
+
+**Keep the follow-up task SHORT:** instruct Claude to read the review
+comments itself and address each one — don't paste the full comment text
+into the prompt. Cleaner, less drift, Claude sees the canonical source:
+
+```
+gh api repos/<owner>/<repo>/pulls/<N>/comments --jq '.[].body' 로 리뷰 코멘트를 읽고,
+각 코멘트에 대해 반영하거나 반영하지 않을 근거를 답변으로 남겨라.
+```
+
+After the fix push: re-read the diff, re-run gates independently on the new
+head SHA, then close each comment in a re-review.
+
+### Step 6: Done only when
+
+- All inline comments have resolution replies or fixes,
+- independent verification passes on the final head SHA (tests + sabotage),
+- no out-of-scope files changed.
+
+## Pitfalls
+
+- Foreground timeouts kill long delegations → always background +
+  notify_on_complete.
+- Trusting child's "PR created" summary without checking head SHA/diff.
+- Heredoc/quoting mangles JSON review payloads with backticks/`$` — write
+  the payload with a file-write tool instead.
+- APPROVE 422 on own PR → use COMMENT event.
+- Sabotage test is the only proof a guard actually bites.
+- Blanket `--dangerously-skip-permissions` on a repo checkout lets the
+  child touch anything — prefer scoped allowlists.

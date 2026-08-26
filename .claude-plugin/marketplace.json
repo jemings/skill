@@ -41,6 +41,11 @@
       "description": "Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts."
     },
     {
+      "name": "claude-delegation",
+      "source": "./plugins/claude-delegation",
+      "description": "Delegate a GitHub issue to Claude Code CLI end to end: implement, open a PR, adversarially review, and loop re-delegation until every review comment is resolved."
+    },
+    {
       "name": "claude-update",
       "source": "./plugins/claude-update",
       "description": "Install the latest claude-code native release directly, bypassing the built-in updater's fixed download deadline that fails on slow links: manifest lookup, resumable checksum-verified download, atomic symlink swap."
