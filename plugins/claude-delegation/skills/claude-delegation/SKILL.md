@@ -5,9 +5,8 @@ description: >-
   Delegate a GitHub issue to Claude Code CLI end to end: implement, open a
   PR, adversarially review it yourself, and loop re-delegation until every
   review comment is resolved. Use when the user says "do #N", "#N 해줘",
-  "이슈 #N 맡겼으니 PR까지 만들고 리뷰까지 해", or references any bare
-  "#N" issue number as a task to carry out — treat "#N" as GitHub issue
-  #N and run this skill.
+  or references any bare "#N" issue number as a task — treat "#N" as
+  GitHub issue #N and run this skill.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -23,7 +22,6 @@ comments closed with independent verification on the final head SHA**, not
 
 - "do #N", "#N 해줘" — a bare issue number is enough; treat `#N` as GitHub
   issue #N in the current repo and run this skill.
-- "이슈 #N 맡겼으니 PR까지 만들고 리뷰까지 해" — issue delegation with review loop.
 - Any request to delegate implementation to Claude Code and gate it on your own adversarial review.
 
 If the user gives only `#N` with no other instruction, default to this
