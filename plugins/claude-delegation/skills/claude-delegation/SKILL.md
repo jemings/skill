@@ -44,13 +44,15 @@ are known.
 
 **Work in a Claude worktree, not the main checkout.** Branches alone block
 parallel work — other sessions can't run concurrently on the same working
-tree. Have Claude create it (`claude -w issue-<N>` creates
-`.claude/worktrees/issue-<N>` + branch `issue-<N>` and runs there) or create
-it yourself to match Claude's convention:
+tree. Create it yourself to match Claude's convention (directory and branch
+share the same name, 1:1):
 
 ```bash
 git worktree add .claude/worktrees/issue-<N> -b issue-<N>
 ```
+
+(The `claude -w` flag does this too, but it's interactive-mode oriented —
+in print mode (`-p`) create the worktree directly as above.)
 
 Run Claude with the working directory set to that worktree. After merge,
 clean up: `git worktree remove .claude/worktrees/issue-<N>` — keeps the main
