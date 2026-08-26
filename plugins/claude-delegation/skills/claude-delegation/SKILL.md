@@ -42,6 +42,21 @@ are known.
 
 ### Step 2: Delegate to Claude Code (generous limits — never let it get killed)
 
+**Work in a Claude worktree, not the main checkout.** Branches alone block
+parallel work — other sessions can't run concurrently on the same working
+tree. Have Claude create it (`claude -w issue-<N>` creates
+`.claude/worktrees/issue-<N>` + branch `issue-<N>` and runs there) or create
+it yourself to match Claude's convention:
+
+```bash
+git worktree add .claude/worktrees/issue-<N> -b issue-<N>
+```
+
+Run Claude with the working directory set to that worktree. After merge,
+clean up: `git worktree remove .claude/worktrees/issue-<N>` — keeps the main
+checkout on main, clean, so multiple issues can proceed in parallel across
+sessions.
+
 Run in a **background process** (e.g. `terminal(background=true,
 notify_on_complete=true)`), not foreground with a timeout — foreground
 timeouts kill long delegations mid-flight.
@@ -138,7 +153,13 @@ head SHA, then close each comment in a re-review.
 
 - All inline comments have resolution replies or fixes,
 - independent verification passes on the final head SHA (tests + sabotage),
-- no out-of-scope files changed.
+- no out-of-scope files changed,
+- worktree cleaned up after merge (main checkout back on main, clean).
+
+**Always finish with a PR + adversarial review.** Any completed change —
+even skill/doc edits like updating this file itself — goes through the same
+loop: commit → push → open PR → adversarial review → resolve all comments.
+Local-only edits are not "done".
 
 ## Pitfalls
 
@@ -151,3 +172,7 @@ head SHA, then close each comment in a re-review.
 - Sabotage test is the only proof a guard actually bites.
 - Blanket `--dangerously-skip-permissions` on a repo checkout lets the
   child touch anything — prefer scoped allowlists.
+- Working on a branch in the shared checkout kills parallelism — always use
+  `.claude/worktrees/issue-<N>`; clean up after merge.
+- The `-w` flag is interactive-mode oriented; in print mode (`-p`) create
+  the worktree yourself and pass it as the working directory.
