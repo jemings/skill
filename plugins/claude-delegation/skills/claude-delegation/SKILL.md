@@ -163,6 +163,97 @@ even skill/doc edits like updating this file itself — goes through the same
 loop: commit → push → open PR → adversarial review → resolve all comments.
 Local-only edits are not "done".
 
+## Pre-Flight Check (run before every delegation)
+
+### Claude CLI auth
+```bash
+claude auth status   # expect loggedIn: true
+# If first call ever, or auth seems stuck:
+claude -p "hello"   # confirms session cache works; watch for OAuth init extrapost on the first call
+```
+If `claude -p` hangs or returns empty, diagnose before delegating real work — don't send a long task into a broken auth session.
+
+### GitHub API availability (review loop)
+**Test these before designing the loop.** The repo may restrict some endpoints — discover that up front, not mid-loop:
+```bash
+# inline reply:
+gh api repos/OWNER/REPO/pulls/COMMENT_ID/replies --method POST --input /dev/null
+# → 200 OK, or 404 (repo blocks it → use PR issue comments instead)
+
+# resolve:
+gh api repos/OWNER/REPO/pulls/comments/COMMENT_ID/resolve --method POST --input /dev/null
+# → 200 OK, or 404 (cannot resolve → settle via APPROVE/COMMENT review or leave open)
+
+# self-approve:
+gh api repos/OWNER/REPO/pulls/PR_NUMBER/reviews --method POST --input <(jq -n '{body:"ok",event:"APPROVE"}')
+# → 422 "Can not approve your own pull request" → use event: "COMMENT"
+```
+Record results in your task file so the loop can adapt without guessing.
+
+### Worktree sanity (subagent will run here)
+```bash
+cd $WORKTREE
+git branch --show-current   # MUST equal the branch name, not main
+ls $FILE                   # confirm files the subagent will read actually exist
+```
+
+## Delegation Design Rules
+
+- **One subagent, one task.** Don't bundle "read comments + answer + amend PR body + settle review state" into a single subagent. Split: answers-only, amend-only, review-state-only.
+- **Avoid /tmp file dependencies for subagents.** A subagent's environment may not see files you wrote in the parent session. Inline instructions in `goal`/`context` strings instead of pointing at `/tmp/x.md`. If you must use a file, have the subagent `cat` it and assert it's non-empty, or write it from within the subagent's own session.
+- **Tell the subagent to `cd` into the worktree explicitly.** Giving the path is not enough — subagents may run from the parent cwd. First command: `cd $WORKTREE && git branch --show-current` and assert it matches the branch.
+- **Foreground timeouts are normal; background is not always stable.** If a foreground `claude -p` hits the time limit, the CLI may leave an OAuth/auth wait state. Background runs can hit PTY/ioctl errors. Prefer foreground with a generous timeout for short tasks; for long tasks, accept that you may need to re-delegate with a longer budget rather than blindly falling back to background.
+
+## Review Loop — Decision Tree When APIs Reject
+
+When an endpoint returns 404/422, don't retry the same call — switch paths:
+
+| Blocked endpoint | Symptom | Fallback |
+|---|---|---|
+| `POST /pulls/comments/{id}/replies` | 404 Not Found | Post as PR issue comment: `gh pr comment <N> --body "..."` |
+| `POST /pulls/comments/{id}/resolve` | 404 Not Found | Cannot resolve inline; settle via APPROVE/COMMENT review or leave open |
+| `POST /pulls/<N>/reviews event=APPROVE` | 422 "Can not approve your own pull request" | Use `event: "COMMENT"` with verdict text, or have another account approve |
+| `POST /repos/.../issues/comments/{id}` DELETE | 404 Not Found (already auto-deleted or endpoint differs) | Leave duplicates; trim in a later amend rather than fight the API |
+
+Test each before relying on it — don't discover mid-loop.
+
+## Anti-Duplication
+
+Before posting a PR comment or review comment:
+1. `gh api repos/.../issues/<N>/comments --jq '.[].body[0:40]'` — scan for your text
+2. `gh api repos/.../pulls/<N>/reviews/<review_id>/comments --jq '.[].body[0:40]'` — scan inline replies
+
+If a near-duplicate exists, edit the existing one (if supported) or skip rather than post twice.
+
+## PR Body ↔ Code Consistency
+
+After drafting the PR body, verify against the actual diff before submitting:
+```bash
+gh pr diff <N> > /tmp/pr.diff
+# For each claim in the body (file changed, function signature, parameter added/removed),
+# grep /tmp/pr.diff AND read the actual worktree file to confirm.
+```
+Flag any mismatch and amend the body (or the code) before `gh pr create` / `gh pr edit`.
+
+## Test Stub Breakage — Discovery Order
+
+When a function signature gains an optional parameter and tests monkeypatch it:
+1. **Run pytest FIRST** (before fixing stubs) — let it fail.
+2. Confirm the failure is a `TypeError` (wrong arg count) on the monkeypatched stub.
+3. **Then** expand the stub to `*_args` absorption or add the new param.
+4. Run pytest again — green.
+5. Document the discovery order in the PR comment: "pytest first → TypeError → stub fix" so reviewers see the sequence was correct.
+
+This avoids the "should have caught this before running tests" critique and proves the stub change is minimal and justified.
+
+## Merge Strategy (repo-specific)
+
+This repo's `github-workflow` plugin provides `claude-pr-merge` which delegates to
+`gh pr merge --rebase --auto` — rebase (fast-forward) with auto-merge, no merge
+commits by default. When using claude-delegation outside that plugin, prefer the
+same order: **squash → rebase → (if both blocked) report to user**, never fall back
+to merge commit automatically.
+
 ## Pitfalls
 
 - Foreground timeouts kill long delegations → always background +
@@ -178,3 +269,9 @@ Local-only edits are not "done".
   `.claude/worktrees/issue-<N>`; clean up after merge.
 - The `-w` flag is interactive-mode oriented; in print mode (`-p`) create
   the worktree yourself and pass it as the working directory.
+- Merge commits are not the default merge strategy. Prefer squash or rebase
+  (fast-forward). A repository that only allows merge commits is an exception
+  — report it to the user rather than merging with a merge commit by default.
+- This repo's `github-workflow` plugin defaults to `claude-pr-merge`
+  (`gh pr merge --rebase --auto`); when delegating outside that plugin, follow
+  the same rebase-first principle.
