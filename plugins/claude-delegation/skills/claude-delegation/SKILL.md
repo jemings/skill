@@ -323,3 +323,16 @@ to merge commit automatically.
   it hits the same fail-closed unless `bun install` ran or you pass
   `LEFTHOOK=0` through the env. Tell the child to use `LEFTHOOK=0 git commit` in
   the task brief if lefthook isn't installed in the worktree.
+- **Escalation when the child wedges on a deterministic mechanical step —
+  finish it yourself (transparently).** If a delegated run goes silent/uncommitted
+  for >~10 min with correct-looking edits, it is usually wedged on `git commit`
+  (lefthook fail-closed), not stuck on the fix. Do NOT loop re-delegation — it will
+  wedge identically. Instead: (1) `kill` the process; (2) `git -C <worktree> diff` +
+  run the gates yourself (ruff/pytest/script) to confirm the child's code is
+  actually correct; (3) if green, complete the deterministic tail yourself —
+  `LEFTHOOK=0 git commit`, `git push`, and post the PR response comment summarizing
+  the fix (GitHub as the medium); (4) note transparently in the comment that the
+  child authored the fix but wedged on commit, so you finished the push. This honors
+  "don't trust the child's report" (you verified by running gates) while not burning
+  turns re-delegating a deterministic commit. Re-delegate only when the *fix itself*
+  is wrong, not when only the mechanical close is stuck.
