@@ -139,14 +139,40 @@ Loop Steps 2–4 on the SAME PR branch until each review comment is either
 fixed or explicitly justified as no-change (with reasoning). Then post a
 re-review confirming each comment resolved/closed.
 
-**Keep the follow-up task SHORT:** instruct Claude to read the review
-comments itself and address each one — don't paste the full comment text
-into the prompt. Cleaner, less drift, Claude sees the canonical source:
+**GitHub is the only medium — never the launcher↔child channel.** This is
+the single most important rule of the loop, and the easiest to violate:
+
+- **Do NOT paste review comment text into the child's prompt.** Handing the
+  child the exact comment text trains it to "answer you" (the launcher)
+  instead of writing to the PR. Instead, tell the child to **read the PR
+  comments itself** (`gh api repos/<owner>/<repo>/pulls/<N>/comments` and
+  `/reviews`) and address each one. It sees the canonical source and stays in
+  the GitHub loop.
+- **Do NOT ask the child to "report back to me / summarize to the launcher".**
+  Its deliverable is (1) code fixes and (2) PR comments it posts. You verify by
+  **reading the PR**, not by reading the child's stdout. If the child's final
+  message is addressed to you, that is a smell — the responses belong on
+  GitHub.
+- **Child response recording:** where inline reply is 404 (some repos block
+  `POST /pulls/comments/{id}/replies`), instruct the child to post a single
+  `gh pr comment <N> --body "..."` summarizing how it addressed each comment
+  (with file:line refs). That comment IS its response and the audit trail;
+  your next re-review confirms closure.
+- **Keep the follow-up task SHORT** and self-contained: issue summary, the PR
+  number, the gates to run, scope constraints, and "read the PR comments
+  yourself, fix them, post your response as a PR comment." Don't paste the
+  full comment text into the prompt — cleaner, less drift, Claude sees the
+  canonical source:
 
 ```
 gh api repos/<owner>/<repo>/pulls/<N>/comments --jq '.[].body' 로 리뷰 코멘트를 읽고,
 각 코멘트에 대해 반영하거나 반영하지 않을 근거를 답변으로 남겨라.
 ```
+
+- **Verify the child edited the WORKTREE, not main:** after the child
+  finishes, run `git -C <worktree> status --short` and `git -C <worktree> log -1`
+  (NOT `git status`/`git log` in the repo root — the root is a different tree)
+  and re-read the changed files in the worktree before posting the re-review.
 
 After the fix push: re-read the diff, re-run gates independently on the new
 head SHA, then close each comment in a re-review.
@@ -275,3 +301,25 @@ to merge commit automatically.
 - This repo's `github-workflow` plugin defaults to `claude-pr-merge`
   (`gh pr merge --rebase --auto`); when delegating outside that plugin, follow
   the same rebase-first principle.
+- **Edit paths must target the WORKTREE, never the main checkout.**
+  `write_file`/`patch` resolve absolute paths against CWD. If you
+  `git worktree add` then call `patch` with `/repo/apps/...` (main) instead of
+  `/repo/.claude/worktrees/issue-<N>/apps/...`, the edits land in `main` and
+  `git status` in the worktree shows nothing — you silently corrupt main and
+  the PR stays empty. Always prefix paths with the worktree root. Verify with
+  `git -C <worktree> status --short` (not `git status` in the repo root) after
+  every batch of edits.
+- **lefthook pre-commit fail-closed in a fresh worktree.** A hand-owned
+  pre-commit shim (`core.hooksPath=.githooks`) exits 1 when it can't locate the
+  `lefthook` binary, which aborts the commit and git resets it. A worktree has
+  no `node_modules`, so `bun install` must run at the repo root first, OR commit
+  with `LEFTHOOK=0 git commit ...` (documented escape hatch). `LEFTHOOK=0` only
+  bypasses the missing-binary fail-closed — the lint/prettier hooks still ran
+  and passed in this session.
+- **`gh pr create` may abort with "push first or use --head" even right after
+  `git push`.** Pass `--head issue-<N>` explicitly (and `--base main`) to force
+  it.
+- **Child commits under lefthook:** if you delegate the commit to Claude Code,
+  it hits the same fail-closed unless `bun install` ran or you pass
+  `LEFTHOOK=0` through the env. Tell the child to use `LEFTHOOK=0 git commit` in
+  the task brief if lefthook isn't installed in the worktree.
