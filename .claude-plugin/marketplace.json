@@ -6,16 +6,6 @@
   "description": "A collection of independently installable Claude Code skills.",
   "plugins": [
     {
-      "name": "github-workflow",
-      "source": "./plugins/github-workflow",
-      "description": "Start/finish GitHub Issue-based work sessions backed by a Project (v2) board: worktree-isolated branches, dependency gating, PR creation, and status transitions."
-    },
-    {
-      "name": "gh-triage",
-      "source": "./plugins/gh-triage",
-      "description": "Triage GitHub Backlog issues — promote ready ones, enhance with code exploration, split clear sub-items, or ask for clarification."
-    },
-    {
       "name": "gh-pr-reply",
       "source": "./plugins/gh-pr-reply",
       "description": "Fetch a GitHub PR's review comments (humans + bots), apply valid fixes, and reply to every thread."
@@ -53,6 +43,8 @@
   ],
   "renames": {
     "skill": null,
-    "hud": "statusline-kit"
+    "hud": "statusline-kit",
+    "github-workflow": null,
+    "gh-triage": null
   }
 }

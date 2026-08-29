@@ -272,13 +272,11 @@ When a function signature gains an optional parameter and tests monkeypatch it:
 
 This avoids the "should have caught this before running tests" critique and proves the stub change is minimal and justified.
 
-## Merge Strategy (repo-specific)
+## Merge Strategy
 
-This repo's `github-workflow` plugin provides `claude-pr-merge` which delegates to
-`gh pr merge --rebase --auto` — rebase (fast-forward) with auto-merge, no merge
-commits by default. When using claude-delegation outside that plugin, prefer the
-same order: **squash → rebase → (if both blocked) report to user**, never fall back
-to merge commit automatically.
+Prefer **squash → rebase → (if both blocked) report to user**; never fall back to
+a merge commit automatically. Where squash is unavailable, `gh pr merge --rebase
+--auto` — rebase (fast-forward) with auto-merge — is the intended shape.
 
 ## Pitfalls
 
@@ -298,9 +296,6 @@ to merge commit automatically.
 - Merge commits are not the default merge strategy. Prefer squash or rebase
   (fast-forward). A repository that only allows merge commits is an exception
   — report it to the user rather than merging with a merge commit by default.
-- This repo's `github-workflow` plugin defaults to `claude-pr-merge`
-  (`gh pr merge --rebase --auto`); when delegating outside that plugin, follow
-  the same rebase-first principle.
 - **Edit paths must target the WORKTREE, never the main checkout.**
   `write_file`/`patch` resolve absolute paths against CWD. If you
   `git worktree add` then call `patch` with `/repo/apps/...` (main) instead of

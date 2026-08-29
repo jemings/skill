@@ -1,6 +1,6 @@
 {
   "name": "claude-delegation",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Delegate a GitHub issue to Claude Code CLI end to end: implement, open a PR, adversarially review, and loop re-delegation until every review comment is resolved.",
   "author": {
     "name": "jemings"
