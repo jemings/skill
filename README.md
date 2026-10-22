@@ -13,9 +13,11 @@ want, each as its own `plugins/<name>/`.
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
 | **agent-update**     | `agent-update`     | Install the latest native release directly, skipping `claude update`'s fixed download deadline that fails on a slow proxy: manifest lookup, resumable checksum-verified download, atomic symlink swap. |
 | **agent-delegation**  | `agent-delegation`  | Delegate a GitHub issue to Claude Code CLI end to end: implement → open PR → adversarial review by the delegating agent → re-delegation loop until every review comment is resolved and independently verified. |
+| **agent-dispatch**    | `agent-dispatch`    | Advance a map issue's frontier: subagents self-grill every startable `needs-triage` sub-issue → the orchestrator decides what the evidence settles and asks the human only the contested rest (one round) → each issue is rewritten as an agent contract and moved to `ready-for-agent` → implement / diagnosing-bugs subagents open the PRs. |
 
-All seven plugins are fully independent — no shared files, no install ordering,
-no cross-plugin requirements.
+All eight plugins are fully independent — no shared files, no install ordering,
+no cross-plugin requirements. `agent-dispatch` drives skills from the external
+[mattpocock-skills](https://github.com/mattpocock/skills) plugin (see Prerequisites).
 
 ## Prerequisites
 
@@ -28,6 +30,12 @@ no cross-plugin requirements.
 - `agent-update` needs `curl` and `sha256sum` (or macOS's `shasum`), no `jq`.
 - `agent-delegation` needs the **Claude Code CLI** (`claude` on PATH,
   authenticated — `claude auth status` to check) in addition to `gh`.
+- `agent-dispatch` needs `gh` and the **mattpocock-skills** plugin
+  (`/plugin install mattpocock-skills@claude-plugins-official`), whose
+  `grilling`, `domain-modeling`, `tdd`, `diagnosing-bugs`, and `code-review` skills
+  it hands to its subagents. The repo should have its triage labels
+  (`needs-triage`, `ready-for-agent`, `ready-for-human` or their mapped names)
+  and a map issue whose sub-issues use GitHub's native blocked-by dependencies.
 
 ## Install
 
@@ -42,6 +50,7 @@ In Claude Code:
 /plugin install agent-clinic@skill
 /plugin install agent-update@skill
 /plugin install agent-delegation@skill
+/plugin install agent-dispatch@skill
 ```
 
 Install only the plugins you want — each is independent. Then reload plugins
@@ -49,7 +58,7 @@ Install only the plugins you want — each is independent. Then reload plugins
 `/gh-pr-reply:gh-pr-reply`, `/gh-pr-approve:gh-pr-approve`,
 `/statusline-kit:statusline-kit`, `/skill-optimizer:skill-optimizer`,
 `/agent-clinic:agent-clinic`, `/agent-update:agent-update`,
-`/agent-delegation:agent-delegation` — or
+`/agent-delegation:agent-delegation`, `/agent-dispatch:agent-dispatch` — or
 auto-trigger from natural-language requests (see each skill's description).
 
 ## statusline-kit — statusline setup
@@ -83,7 +92,8 @@ plugins/
 ├── skill-optimizer/ (plugin.json + skills/skill-optimizer/SKILL.md)
 ├── agent-clinic/  (plugin.json + skills/agent-clinic/{SKILL.md, references/})
 ├── agent-update/ (plugin.json + skills/agent-update/{SKILL.md, scripts/})
-└── agent-delegation/ (plugin.json + skills/agent-delegation/SKILL.md)
+├── agent-delegation/ (plugin.json + skills/agent-delegation/SKILL.md)
+└── agent-dispatch/ (plugin.json + skills/agent-dispatch/{SKILL.md, references/})
 ```
 
 New skills land here the same way — add `plugins/<name>/.claude-plugin/plugin.json`
