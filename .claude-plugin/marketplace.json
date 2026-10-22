@@ -39,6 +39,11 @@
       "name": "agent-update",
       "source": "./plugins/agent-update",
       "description": "Install the latest claude-code native release directly, bypassing the built-in updater's fixed download deadline that fails on slow links: manifest lookup, resumable checksum-verified download, atomic symlink swap."
+    },
+    {
+      "name": "agent-dispatch",
+      "source": "./plugins/agent-dispatch",
+      "description": "Advance a map issue's frontier: subagents self-grill every startable needs-triage sub-issue, the orchestrator decides what evidence settles and asks the human the rest, rewrites each issue as a ready-for-agent contract, then dispatches implement or diagnosing-bugs subagents."
     }
   ],
   "renames": {
