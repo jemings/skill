@@ -14,6 +14,7 @@ Respond in <언어>.
 ## Where to work
 
 - Work in your own worktree: `<저장소 규칙의 worktree 자리와 브랜치 이름, 예: .claude/worktrees/<N>-<slug>>`, created from the current `origin/main`.
+- Put the issue number `<N>` in both the worktree directory name and the branch name. Other sessions recognise work in flight by it.
 - Leave the main checkout and every other tree as they are.
 - <겹침이 있으면: #<M> 도 <파일> 을 바꾼다 — 먼저 병합되는 쪽 위로 rebase 한다.>
 
