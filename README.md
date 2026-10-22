@@ -11,8 +11,8 @@ want, each as its own `plugins/<name>/`.
 | **statusline-kit**   | `statusline-kit`   | Install the statusline (model, cwd/branch, context usage, session token totals) into a fresh environment, identical to wherever it was set up originally. |
 | **skill-optimizer**  | `skill-optimizer`  | Slim and restructure a SKILL.md without losing behavior, trigger coverage, anchors, or facts: measure → invariants → plan → five levers (description slim, prose compression, reference split, shell externalization, hook absorption) → verify. Also detects duplicated skill copies and unifies them. |
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
-| **claude-update**    | `claude-update`    | Install the latest native release directly, skipping `claude update`'s fixed download deadline that fails on a slow proxy: manifest lookup, resumable checksum-verified download, atomic symlink swap. |
-| **claude-delegation** | `claude-delegation` | Delegate a GitHub issue to Claude Code CLI end to end: implement → open PR → adversarial review by the delegating agent → re-delegation loop until every review comment is resolved and independently verified. |
+| **agent-update**     | `agent-update`     | Install the latest native release directly, skipping `claude update`'s fixed download deadline that fails on a slow proxy: manifest lookup, resumable checksum-verified download, atomic symlink swap. |
+| **agent-delegation**  | `agent-delegation`  | Delegate a GitHub issue to Claude Code CLI end to end: implement → open PR → adversarial review by the delegating agent → re-delegation loop until every review comment is resolved and independently verified. |
 
 All seven plugins are fully independent — no shared files, no install ordering,
 no cross-plugin requirements.
@@ -20,13 +20,13 @@ no cross-plugin requirements.
 ## Prerequisites
 
 - **[GitHub CLI](https://cli.github.com)** authenticated (`gh auth login`).
-  Needed by `gh-pr-reply`, `gh-pr-approve`, and `claude-delegation`.
+  Needed by `gh-pr-reply`, `gh-pr-approve`, and `agent-delegation`.
 - **`jq`**, **`git`**, **`bash` 4+**.
 - Optional: `shellcheck` (lint of any shell scripts), `actionlint` (workflow lint).
 - `statusline-kit`, `skill-optimizer`, and `agent-clinic` have no external dependencies
   beyond `bash`.
-- `claude-update` needs `curl` and `sha256sum` (or macOS's `shasum`), no `jq`.
-- `claude-delegation` needs the **Claude Code CLI** (`claude` on PATH,
+- `agent-update` needs `curl` and `sha256sum` (or macOS's `shasum`), no `jq`.
+- `agent-delegation` needs the **Claude Code CLI** (`claude` on PATH,
   authenticated — `claude auth status` to check) in addition to `gh`.
 
 ## Install
@@ -40,16 +40,16 @@ In Claude Code:
 /plugin install statusline-kit@skill
 /plugin install skill-optimizer@skill
 /plugin install agent-clinic@skill
-/plugin install claude-update@skill
-/plugin install claude-delegation@skill
+/plugin install agent-update@skill
+/plugin install agent-delegation@skill
 ```
 
 Install only the plugins you want — each is independent. Then reload plugins
 (`/reload-plugins`) if prompted. The skills are invoked as
 `/gh-pr-reply:gh-pr-reply`, `/gh-pr-approve:gh-pr-approve`,
 `/statusline-kit:statusline-kit`, `/skill-optimizer:skill-optimizer`,
-`/agent-clinic:agent-clinic`, `/claude-update:claude-update`,
-`/claude-delegation:claude-delegation` — or
+`/agent-clinic:agent-clinic`, `/agent-update:agent-update`,
+`/agent-delegation:agent-delegation` — or
 auto-trigger from natural-language requests (see each skill's description).
 
 ## statusline-kit — statusline setup
@@ -82,8 +82,8 @@ plugins/
 ├── statusline-kit/ (plugin.json + skills/statusline-kit/{SKILL.md, scripts/})
 ├── skill-optimizer/ (plugin.json + skills/skill-optimizer/SKILL.md)
 ├── agent-clinic/  (plugin.json + skills/agent-clinic/{SKILL.md, references/})
-├── claude-update/ (plugin.json + skills/claude-update/{SKILL.md, scripts/})
-└── claude-delegation/ (plugin.json + skills/claude-delegation/SKILL.md)
+├── agent-update/ (plugin.json + skills/agent-update/{SKILL.md, scripts/})
+└── agent-delegation/ (plugin.json + skills/agent-delegation/SKILL.md)
 ```
 
 New skills land here the same way — add `plugins/<name>/.claude-plugin/plugin.json`
