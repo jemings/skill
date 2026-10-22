@@ -33,7 +33,9 @@ no cross-plugin requirements. `agent-dispatch` drives skills from the external
 - `agent-dispatch` needs `gh` and the **mattpocock-skills** plugin
   (`/plugin install mattpocock-skills@claude-plugins-official`), whose
   `grilling`, `domain-modeling`, `tdd`, `diagnosing-bugs`, and `code-review` skills
-  it hands to its subagents. The repo should have its triage labels
+  it hands to its subagents. Before taking an issue it reads the local Claude Code
+  session records (`~/.claude/sessions`, `~/.claude/projects`) with `jq` and skips
+  issues another live session already holds. The repo should have its triage labels
   (`needs-triage`, `ready-for-agent`, `ready-for-human` or their mapped names)
   and a map issue whose sub-issues use GitHub's native blocked-by dependencies.
 
@@ -93,7 +95,7 @@ plugins/
 ├── agent-clinic/  (plugin.json + skills/agent-clinic/{SKILL.md, references/})
 ├── agent-update/ (plugin.json + skills/agent-update/{SKILL.md, scripts/})
 ├── agent-delegation/ (plugin.json + skills/agent-delegation/SKILL.md)
-└── agent-dispatch/ (plugin.json + skills/agent-dispatch/{SKILL.md, references/})
+└── agent-dispatch/ (plugin.json + skills/agent-dispatch/{SKILL.md, references/, scripts/})
 ```
 
 New skills land here the same way — add `plugins/<name>/.claude-plugin/plugin.json`
