@@ -24,9 +24,12 @@ frontier 는 병합이 쌓여야 전진한다. 그래서 한 번 돌릴 때 지�
 병합된 뒤 다시 돌린다.
 
 필요한 스킬: `grilling`·`domain-modeling`·`tdd`·`diagnosing-bugs`·`code-review`(mattpocock-skills). 목록에
-플러그인 접두어가 붙어 있으면(`mattpocock-skills:tdd`) 그 이름으로 부른다. `grill-with-docs`·`implement` 는
-사용자 전용이라 서브에이전트가 부를 수 없다. 그래서 이 스킬이 두 스킬의 내용(grilling + domain-modeling,
-구현 절차)을 서브에이전트 지시문에 직접 싣는다.
+플러그인 접두어가 붙어 있으면(`mattpocock-skills:tdd`) 그 이름으로 부른다.
+- 서브에이전트는 이 스킬들을 직접 부른다. `grill-with-docs` 는 `grilling` + `domain-modeling` 을 부르는 것이
+  전부이고, `implement` 의 축은 `tdd` 와 `code-review` 다. 이 둘은 사용자 전용이라 서브에이전트가 부를 수 없다.
+- `references/` 의 지시문 틀이 더하는 것은 그 스킬들에 없는 오케스트레이션 몫이다.
+  - grilling 쪽: 사람 없이 스스로 grilling 하는 법과, 돌려줄 리포트의 모양.
+  - 구현 쪽: 이슈 본문이 계약서라는 것, 자기 worktree, 멈출 조건, 보고 형식.
 
 ## 0. 저장소 규칙을 읽는다
 
