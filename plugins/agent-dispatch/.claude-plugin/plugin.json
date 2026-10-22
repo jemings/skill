@@ -1,6 +1,6 @@
 {
   "name": "agent-dispatch",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Advance the frontier of a map issue: self-grill every startable needs-triage sub-issue with subagents, decide what the evidence settles, ask the human the rest, rewrite each issue as an agent contract, mark it ready-for-agent, and dispatch implement or diagnosing-bugs subagents.",
   "author": {
     "name": "jemings"
