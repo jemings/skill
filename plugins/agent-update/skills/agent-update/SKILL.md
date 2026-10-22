@@ -1,5 +1,5 @@
 ---
-name: claude-update
+name: agent-update
 license: Apache-2.0
 description: >-
   claude-code 네이티브 자동 업데이트(`claude update` / `claude install`)가
@@ -10,7 +10,7 @@ description: >-
 allowed-tools: Bash
 ---
 
-# claude-update — 네이티브 업데이터 우회 설치
+# agent-update — 네이티브 업데이터 우회 설치
 
 ## Role
 
@@ -43,7 +43,7 @@ Windows 는 다루지 않는다.
 백그라운드로 띄우면 완료 시 알림이 오므로, 그 전까지 성공/실패를 단정하지 않는다.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/claude-update/scripts/update.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-update/scripts/update.sh"
 ```
 
 중간 확인이 필요하면 로그 파일을 `tail` 한다 — 30초마다 한 줄씩 쌓인다

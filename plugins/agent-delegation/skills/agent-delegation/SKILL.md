@@ -1,5 +1,5 @@
 ---
-name: claude-delegation
+name: agent-delegation
 license: Apache-2.0
 description: >-
   Delegate a GitHub issue to Claude Code CLI end to end: implement, open a
@@ -10,7 +10,7 @@ description: >-
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
-# claude-delegation — Issue → Claude Code → PR → Adversarial Review Loop
+# agent-delegation — Issue → Claude Code → PR → Adversarial Review Loop
 
 End-to-end: take a GitHub issue, delegate implementation to the Claude Code
 CLI, verify the PR really exists, review it adversarially yourself, and loop
