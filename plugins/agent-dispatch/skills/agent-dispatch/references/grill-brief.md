@@ -30,7 +30,7 @@ Respond in <언어>, keeping identifiers in their original form.
 
 ## What to produce
 
-1. **사실 대조 (drift)**: check every concrete claim in the issue against current `main` (state the SHA): paths, line numbers, symbol names, counts, call sites, test names. List each wrong or stale claim with the correct value. Also list relevant sites the issue misses.
+1. **사실 대조 (drift)**: check every concrete claim in the issue against current `<base>` (state the SHA): paths, line numbers, symbol names, counts, call sites, test names. List each wrong or stale claim with the correct value. Also list relevant sites the issue misses.
 2. **설계 트리**: every decision an implementer must make. For each decision:
    - **SETTLED**: give a one-line citation of the doc, ADR, map decision, or code fact that settles it, or
    - **OPEN** `<N>-Q<k>`: give the options, your recommendation, its drawbacks, and why the evidence does not settle it.
