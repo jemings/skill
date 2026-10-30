@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# in-flight.sh — 이슈가 이미 누군가의 손에 있는지 본다(agent-dispatch 1·5·6단계). 저장소 체크아웃 안에서 돌린다.
+# in-flight.sh -- 이슈가 이미 누군가의 손에 있는지 본다(agent-dispatch 1, 5, 6단계). 저장소 체크아웃 안에서 돌린다.
 #
 #   in-flight.sh [--repo owner/repo] <N>...          판정
 #   in-flight.sh --claim [--repo owner/repo] <N>...  이 세션이 맡았다고 표시한다(같은 PC 의 다른 agent-dispatch 가 본다)
@@ -7,14 +7,14 @@
 #
 # 판정(이슈마다 한 줄, 근거는 그 아래 들여 쓴 줄):
 #   BUSY   살아 있는 다른 세션의 작업 디렉터리(cwd)가 그 이슈의 worktree 이거나, 그 세션이 맡았다고 표시했거나, 열린 PR 이 있다
-#   MAYBE  다른 살아 있는 세션이 그 worktree 경로로 명령을 돌렸거나, 그 세션의 사람 지시에 #N 이 나온다 — 그 세션에 물어 확인한다
-#   HELD   이슈 번호가 든 worktree·브랜치가 남아 있는데 그 자리에서 일하는 세션은 없다 — 남은 것을 들여다본다
+#   MAYBE  다른 살아 있는 세션이 그 worktree 경로로 명령을 돌렸거나, 그 세션의 사람 지시에 #N 이 나온다 -- 그 세션에 물어 확인한다
+#   HELD   이슈 번호가 든 worktree, 브랜치가 남아 있는데 그 자리에서 일하는 세션은 없다 -- 남은 것을 들여다본다
 #   FREE   위 어느 것도 없다
 #
-# 근거: ~/.claude/sessions/<pid>.json(살아 있는 세션 — pid 와 procStart 로 확인), 그 세션 기록
-# ~/.claude/projects/*/<sessionId>.jsonl 의 cwd·사람 지시, git worktree·브랜치, gh 의 열린 PR.
-# 세션 파일의 cwd 는 기동 디렉터리라 worktree 로 옮겨 간 세션을 가리지 못한다 — 그래서 기록의 cwd 를 본다.
-# 헤더 규칙: 도움말(-h)은 2행부터 첫 비주석 줄 직전까지 낸다 — 헤더 안에 빈 줄이나 비주석 줄을 두면 거기서 끊긴다.
+# 근거: ~/.claude/sessions/<pid>.json(살아 있는 세션 -- pid 와 procStart 로 확인), 그 세션 기록
+# ~/.claude/projects/*/<sessionId>.jsonl 의 cwd, 사람 지시, git worktree, 브랜치, gh 의 열린 PR.
+# 세션 파일의 cwd 는 기동 디렉터리라 worktree 로 옮겨 간 세션을 가리지 못한다 -- 그래서 기록의 cwd 를 본다.
+# 헤더 규칙: 도움말(-h)은 2행부터 첫 비주석 줄 직전까지 낸다 -- 헤더 안에 빈 줄이나 비주석 줄을 두면 거기서 끊긴다.
 # 필요한 것: bash 4+, jq, git, gh.
 set -euo pipefail
 
@@ -45,7 +45,7 @@ command -v jq >/dev/null || die "jq 가 필요하다"
 [ -n "$repo" ] || repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || die "--repo 를 줘라"
 key=${repo//\//_}
 
-# 프로세스가 살아 있고, 세션 파일을 쓴 그 프로세스인가(pid 재사용 배제 — /proc 가 있을 때만 starttime 대조)
+# 프로세스가 살아 있고, 세션 파일을 쓴 그 프로세스인가(pid 재사용 배제 -- /proc 가 있을 때만 starttime 대조)
 alive() {
   kill -0 "$1" 2>/dev/null || return 1
   [ "$2" != - ] && [ -r "/proc/$1/stat" ] || return 0
@@ -77,7 +77,7 @@ fi
 
 git fetch -q --prune origin 2>/dev/null || true
 
-# 살아 있는 다른 세션: 이름 · 최근 cwd 목록 · 최근 기록 원문 · 사람 지시 — 임시 파일에 한 번만 뽑아 둔다
+# 살아 있는 다른 세션: 이름, 최근 cwd 목록, 최근 기록 원문, 사람 지시 -- 임시 파일에 한 번만 뽑아 둔다
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 names=()
 for f in "$SESS"/*.json; do
@@ -92,10 +92,10 @@ for f in "$SESS"/*.json; do
   if [ -n "$t" ]; then
     tail -n "$TAIL" "$t" > "$tmp/$i.tail"
     jq -R -r 'fromjson? | .cwd // empty' "$tmp/$i.tail" >> "$tmp/$i.cwd"
-    # 그 세션이 돌린 도구 입력(명령·경로). 도구 결과는 넣지 않는다 — `git worktree list` 같은 출력이 모든 경로를 담는다
+    # 그 세션이 돌린 도구 입력(명령, 경로). 도구 결과는 넣지 않는다 -- `git worktree list` 같은 출력이 모든 경로를 담는다
     jq -R -r 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .input | tostring' \
       "$tmp/$i.tail" > "$tmp/$i.cmd" 2>/dev/null || true
-    # 사람이 친 지시만: 사이드체인·도구 결과·다른 세션의 메시지·시스템 알림은 뺀다
+    # 사람이 친 지시만: 사이드체인, 도구 결과, 다른 세션의 메시지, 시스템 알림은 뺀다
     jq -R -r 'fromjson? | select(.type == "user" and (.isSidechain | not))
       | .message.content
       | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end
@@ -139,11 +139,11 @@ for n in "$@"; do
   fi
 
   # 열린 PR: 제목의 #N, 이슈 번호가 든 브랜치, 본문의 Closes/Fixes/Resolves #N 이면 그 이슈의 작업이다(BUSY).
-  # 본문에 Refs #N 만 있으면 곁가지일 수 있다(그 이슈를 하다 찾은 다른 결함 등) — MAYBE.
+  # 본문에 Refs #N 만 있으면 곁가지일 수 있다(그 이슈를 하다 찾은 다른 결함 등) -- MAYBE.
   while IFS=$'\t' read -r kind head line; do
     [ -n "$kind" ] || continue
     skip_refs+=("$head" "origin/$head")
-    if [ "$kind" = own ]; then up BUSY; ev+=("$line"); else up MAYBE; ev+=("$line — Refs 만 있다, 그 이슈의 작업인지 확인"); fi
+    if [ "$kind" = own ]; then up BUSY; ev+=("$line"); else up MAYBE; ev+=("$line -- Refs 만 있다, 그 이슈의 작업인지 확인"); fi
   done < <(gh pr list --repo "$repo" --state open --limit 100 --search "$n" \
              --json number,title,headRefName,body 2>/dev/null \
            | jq -r --arg n "$n" '.[]
@@ -154,7 +154,7 @@ for n in "$@"; do
              | select($own or $refs)
              | [(if $own then "own" else "refs" end), .headRefName, "열린 PR #\(.number) [\(.headRefName)] \(.title)"] | @tsv')
 
-  # 이슈 번호가 든 worktree — 그 안에서 일하는 살아 있는 세션
+  # 이슈 번호가 든 worktree -- 그 안에서 일하는 살아 있는 세션
   wts=()
   while IFS=$'\t' read -r path branch; do
     [ -n "$path" ] || continue
@@ -166,12 +166,12 @@ for n in "$@"; do
       if has_path "$tmp/$i.cwd" "$path"; then
         up BUSY; held=0; ev+=("세션 ${names[$i]} 이 worktree $path 에서 일한다")
       elif mentions_path "$tmp/$i.cmd" "$path"; then
-        up MAYBE; held=0; ev+=("세션 ${names[$i]} 이 worktree $path 로 명령을 돌렸다 — 그 세션에 물어 확인")
+        up MAYBE; held=0; ev+=("세션 ${names[$i]} 이 worktree $path 로 명령을 돌렸다 -- 그 세션에 물어 확인")
       fi
     done
     if [ $held = 1 ]; then
       up HELD
-      ev+=("worktree $path [$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null)] 마지막 커밋 $(git -C "$path" log -1 --format=%cr 2>/dev/null) — 일하는 세션 없음")
+      ev+=("worktree $path [$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null)] 마지막 커밋 $(git -C "$path" log -1 --format=%cr 2>/dev/null) -- 일하는 세션 없음")
     fi
   done
 
@@ -187,7 +187,7 @@ for n in "$@"; do
   # 다른 세션의 사람 지시에 #N
   for i in "${!names[@]}"; do
     if grep -q -E "#$n([^0-9]|\$)" "$tmp/$i.ask"; then
-      up MAYBE; ev+=("세션 ${names[$i]} 의 사람 지시에 #$n 이 나온다 — 그 세션에 물어 확인")
+      up MAYBE; ev+=("세션 ${names[$i]} 의 사람 지시에 #$n 이 나온다 -- 그 세션에 물어 확인")
     fi
   done
 
