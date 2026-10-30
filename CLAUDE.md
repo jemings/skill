@@ -48,3 +48,19 @@ bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh
 ```bash
 bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
 ```
+
+## agent-dispatch 는 문장부호를 ASCII 로 쓴다
+
+`agent-dispatch` 의 사내 배포 사본은 원본과 바이트 단위로 같아야 동기화가 쉽다.
+그런데 사내 스킬 스캐너는 em dash 하나에도 HIGH finding 을 내고 실패로 판정하므로,
+원본에 섞인 문장부호를 사본에서 따로 치환하면 사본이 원본과 달라진다. 그래서
+원본부터 ASCII 로 쓴다.
+
+`plugins/agent-dispatch/` 아래에는 한글 말고 non-ASCII 문자를 쓰지 않는다
+(가운뎃점, em dash, 화살표, 말줄임표, 이모지 등). 대신 `, ` `/` ` -- ` `->` `...`
+를 쓰고 장식 기호는 말로 푼다. 이 디렉터리를 고쳤다면 커밋 전에 반드시 돌린다.
+걸리는 문자가 있으면 exit 1 과 함께 `파일:줄:문자 U+XXXX` 로 낸다:
+
+```bash
+bash scripts/check-ascii.sh plugins/agent-dispatch
+```
