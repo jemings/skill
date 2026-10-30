@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wait-prs.sh — 지켜보는 PR 가운데 하나에 일이 생길 때까지 기다린다(agent-dispatch 9단계).
 #
-#   wait-prs.sh [--repo owner/repo] [--interval 초] [--timeout 초] [--other <PR>]... [<PR>...]
+#   wait-prs.sh [--repo [HOST/]OWNER/REPO] [--interval 초] [--timeout 초] [--other <PR>]... [<PR>...]
 #
 #   <PR>          이 실행이 연 PR — MERGED·CLOSED·CONFLICTING 을 본다
 #   --other <PR>  지도 안의 이슈를 막고 있는 다른 세션의 PR — MERGED·CLOSED 만 본다
@@ -44,6 +44,11 @@ for n in ${mine[@]+"${mine[@]}"} ${others[@]+"${others[@]}"}; do [[ $n =~ ^[0-9]
 [[ $max_fail =~ ^[0-9]+$ && $max_fail -gt 0 ]] || die "WAIT_PRS_MAX_FAIL 은 양의 정수다: $max_fail"
 command -v gh >/dev/null || die "gh 가 필요하다"
 [ -n "$repo" ] || repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || die "--repo 를 줘라"
+# gh 의 -R 처럼 [HOST/]OWNER/REPO 와 그 URL(https://HOST/OWNER/REPO[.git])을 받는다
+repo=${repo#http://}; repo=${repo#https://}; repo=${repo%/}; repo=${repo%.git}
+host=() owner=${repo%/*} name=${repo##*/}
+case $owner in */*) host=(--hostname "${owner%%/*}"); owner=${owner#*/} ;; esac
+[[ $repo == */* && -n $owner && -n $name && $owner != */* ]] || die "--repo 는 [HOST/]OWNER/REPO 다: $repo"
 
 if command -v timeout >/dev/null; then
   query() { timeout 60 gh "$@"; }
@@ -57,10 +62,17 @@ trap 'rm -f "$err"' EXIT
 fails=()   # PR 번호 → 잇단 실패 횟수. 한 PR 의 실패가 다른 PR 의 지켜보기를 끝내지 않게 PR 마다 센다.
 events=()
 
+# PR 하나를 한 질의로 본다. gh 는 응답에 errors 가 있으면 0 이 아닌 값으로 끝난다.
+# shellcheck disable=SC2016  # $owner 따위는 GraphQL 변수다
+gql='query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { state mergeable } }
+}'
+
 # poll <PR> <mine|other> — 그 PR 의 일을 events 에 더한다.
 poll() {
   local n=$1 kind=$2 line rc=0 state mergeable why
-  line=$(query pr view "$n" -R "$repo" --json state,mergeable --jq '"\(.state) \(.mergeable)"' 2>"$err") || rc=$?
+  line=$(query api graphql ${host[@]+"${host[@]}"} -f query="$gql" -f owner="$owner" -f name="$name" -F number="$n" \
+    --jq '.data.repository.pullRequest | "\(.state) \(.mergeable)"' 2>"$err") || rc=$?
   if [ "$rc" = 0 ]; then
     read -r state mergeable <<<"$line"
     case $state in
