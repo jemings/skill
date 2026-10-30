@@ -13,7 +13,7 @@ want, each as its own `plugins/<name>/`.
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
 | **agent-update**     | `agent-update`     | Install the latest native release directly, skipping `claude update`'s fixed download deadline that fails on a slow proxy: manifest lookup, resumable checksum-verified download, atomic symlink swap. |
 | **agent-delegation**  | `agent-delegation`  | Delegate a GitHub issue to Claude Code CLI end to end: implement → open PR → adversarial review by the delegating agent → re-delegation loop until every review comment is resolved and independently verified. |
-| **agent-dispatch**    | `agent-dispatch`    | Advance a map issue's frontier: subagents self-grill every startable `needs-triage` sub-issue → the orchestrator decides what the evidence settles and asks the human only the contested rest (one round) → each issue is rewritten as an agent contract and moved to `ready-for-agent` → implement / diagnosing-bugs subagents open the PRs. Each subagent is sized (`model`·`effort`) to the difficulty of its issue, never below `sonnet`·`medium`. |
+| **agent-dispatch**    | `agent-dispatch`    | Advance a map issue's frontier: subagents self-grill every startable `needs-triage` sub-issue → the orchestrator decides what the evidence settles and asks the human only the contested rest (one round) → each issue is rewritten as an agent contract and moved to `ready-for-agent` → implement / diagnosing-bugs subagents run their own adversarial reviewer, apply its findings, and open draft PRs → the orchestrator final-reviews every PR (reruns the tests, checks the diff against the contract, reproduces the key claims) → it watches the PRs and, as each one merges, cleans up and moves on to the next frontier until the map is done. Each subagent is sized (`model`·`effort`) to the difficulty of its issue, never below `sonnet`·`medium`. |
 
 All eight plugins are fully independent — no shared files, no install ordering,
 no cross-plugin requirements. `agent-dispatch` drives skills from the external
@@ -32,10 +32,13 @@ no cross-plugin requirements. `agent-dispatch` drives skills from the external
   authenticated — `claude auth status` to check) in addition to `gh`.
 - `agent-dispatch` needs `gh` and the **mattpocock-skills** plugin
   (`/plugin install mattpocock-skills@claude-plugins-official`), whose
-  `grilling`, `domain-modeling`, `tdd`, `diagnosing-bugs`, and `code-review` skills
-  it hands to its subagents. Before taking an issue it reads the local Claude Code
-  session records (`~/.claude/sessions`, `~/.claude/projects`) with `jq` and skips
-  issues another live session already holds. The repo should have its triage labels
+  `grilling`, `domain-modeling`, `tdd`, and `diagnosing-bugs` skills it hands to
+  its subagents. Merging stays with you: it polls its reviewed PRs, and other
+  sessions' PRs that block the map, with `gh` in a background shell and resumes
+  when one merges, conflicts, or closes. Before
+  taking an issue it reads the local Claude Code session records
+  (`~/.claude/sessions`, `~/.claude/projects`) with `jq` and skips issues another
+  live session already holds. The repo should have its triage labels
   (`needs-triage`, `ready-for-agent`, `ready-for-human` or their mapped names)
   and a map issue whose sub-issues use GitHub's native blocked-by dependencies.
 
