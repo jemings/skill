@@ -112,6 +112,7 @@ cleaned up on the next marketplace sync instead of failing to load.
 
 ```bash
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
+bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh (gh stub, bash:3.2 if docker image exists)
 ```
 
 ## License
