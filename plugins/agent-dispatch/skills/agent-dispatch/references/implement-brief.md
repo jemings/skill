@@ -72,11 +72,11 @@ Stop and report, with the exact passage and the evidence, when:
 - the contract leaves a decision open;
 - the work would need changes outside the contract's scope.
 
-The orchestrator resolves it and re-dispatches you. Record found bugs outside the scope in your report.
+The orchestrator resolves it and re-dispatches you. Do not file issues yourself. Record found bugs outside the scope in your report, each with a reproduction (command and output); the orchestrator files them.
 
 ## Report
 
 - PR URL(s) and the tested SHA. Confirm it equals the PR HEAD.
 - Each completion criterion of the contract: met, with how you checked it. A criterion you met only partly is **not met**; leave its checkbox unchecked and say what is missing.
 - Deviations from the contract and why.
-- Follow-ups: out-of-scope bugs found, boundary notes for sibling issues.
+- Follow-ups: out-of-scope bugs found (each with a reproduction), boundary notes for sibling issues.
