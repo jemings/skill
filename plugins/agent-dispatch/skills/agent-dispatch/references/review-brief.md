@@ -52,6 +52,6 @@ Report only findings you back with **evidence**: a command with its output, a co
 - `major` means a real defect or a lying test.
 - `minor` means everything else.
 
-Tools made: each script you wrote or command sequence you ran by hand more than once, as what / path / times run. "none" is fine. Keep scratch scripts outside the worktree (in the session scratchpad). This is not a finding; keep it out of the table.
+Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run. "none" is fine. Keep scratch scripts outside the worktree (in the session scratchpad). This is not a finding; keep it out of the table.
 
 End with one line per axis: "<axis>: clean -- <what you checked>" or the numbers of its findings. A report without those seven lines is not a review.
