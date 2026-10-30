@@ -91,6 +91,8 @@ files — each is a self-contained, independently installable unit.
 ```
 .claude-plugin/
 └── marketplace.json                          # catalog: one entry per plugin below
+scripts/
+└── check-ascii.sh                            # maintainer guard: non-ASCII (besides Hangul) under a path; not shipped with plugins
 plugins/
 ├── gh-pr-reply/   (plugin.json + skills/gh-pr-reply/{SKILL.md, references/})
 ├── gh-pr-approve/ (plugin.json + skills/gh-pr-approve/{SKILL.md, references/})
@@ -114,6 +116,7 @@ cleaned up on the next marketplace sync instead of failing to load.
 ```bash
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
 bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh (gh stub that runs host jq, bash:3.2 if docker image exists)
+bash scripts/check-ascii.sh plugins/agent-dispatch                              # agent-dispatch must stay ASCII punctuation (exit 1 lists offenders)
 ```
 
 ## License
