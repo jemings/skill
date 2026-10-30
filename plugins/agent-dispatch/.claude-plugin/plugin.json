@@ -1,7 +1,7 @@
 {
   "name": "agent-dispatch",
-  "version": "1.6.1",
-  "description": "Advance the frontier of a map issue: self-grill every startable needs-triage sub-issue with subagents, decide what the evidence settles, ask the human the rest, rewrite each issue as an agent contract, mark it ready-for-agent, dispatch implement or diagnosing-bugs subagents that open draft PRs, run an adversarial reviewer in parallel with the final review of every PR, and keep going as PRs merge until the map is done.",
+  "version": "1.7.0",
+  "description": "Advance the frontier of a map issue (or of any issue set given as a condition such as a label or author): self-grill every startable needs-triage sub-issue with subagents, decide what the evidence settles, ask the human the rest, rewrite each issue as an agent contract, mark it ready-for-agent, dispatch implement or diagnosing-bugs subagents that open draft PRs, run an adversarial reviewer in parallel with the final review of every PR, and keep going as PRs merge until the scope is done, filing defects found along the way straight into the frontier.",
   "author": {
     "name": "jemings"
   },
