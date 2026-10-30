@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# statusline-kit-version: 5
+# statusline-kit-version: 6
 # ↑ statusline 스크립트 쌍(command/tokens)의 단일 버전 표식 — install.sh 의
 # 다운그레이드 가드가 비교한다. 어느 한쪽이라도 수정하면 두 파일 모두 +1.
 # 프롬프트마다 실행되는 렌더러이므로 일부 값 누락 시 빈 statusline보다
@@ -128,7 +128,7 @@ if [ -n "$session_pct" ]; then
     fi
     session_prefix="5h"
     if [[ "$session_resets_at" =~ ^[0-9]+$ ]]; then
-        remaining=$(( session_resets_at - EPOCHSECONDS ))
+        remaining=$(( session_resets_at - ${EPOCHSECONDS:-$(date +%s)} ))
         if [ "$remaining" -gt 0 ]; then
             if [ "$remaining" -lt 3600 ]; then
                 m=$(( (remaining + 30) / 60 ))
