@@ -8,6 +8,7 @@
 #   1. case_<이름>() 함수를 쓴다. 안에서 run_script 로 스크립트를 돌리고 OUT/ERR/RC 를 expect_* 로 대조한다.
 #   2. 아래 CASES 목록에 이름을 적는다.
 #   gh 스텁 응답은 $STUB_DATA 아래 파일로 정한다(set_pr <PR> <state> <mergeable> [<리뷰>] [<댓글>], set_pr_list '<json>').
+#   in-flight 의 세션 fixture(가짜 세션 파일, 세션 기록, claim)는 peers_setup 과 fake_session/fake_transcript/fake_claim 으로 둔다.
 #   bash:3.2 컨테이너에서도 돌릴 경우는 CASES_32 에 적는다 -- run_script 가 알아서 docker 로 돌린다.
 # shellcheck disable=SC2016  # 정적 검사의 시험 입력이 작은따옴표 안의 ${...} 를 담는다
 set -uo pipefail
@@ -17,7 +18,7 @@ WAIT=$SCRIPTS/wait-prs.sh
 FLIGHT=$SCRIPTS/in-flight.sh
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+trap 'kill ${PEER_PIDS[@]+"${PEER_PIDS[@]}"} 2>/dev/null; rm -rf "$TMP"' EXIT
 STUB_BIN=$TMP/bin
 STUB_DATA=$TMP/data
 mkdir -p "$STUB_BIN" "$STUB_DATA"
@@ -336,13 +337,79 @@ case_flight_free() {
 case_flight_help() {
   run_script "$1" "$FLIGHT" -h
   expect_rc 0; expect_err_empty
-  expect_out_has 'FREE'
+  expect_out_has 'FREE'; expect_out_has 'in-flight.sh --peers [--repo owner/repo]'
   case $(printf '%s\n' "$OUT" | tail -n 1) in '필요한 것: '*) ;; *) bad "마지막 줄이 '필요한 것' 이 아니다: '$(printf '%s\n' "$OUT" | tail -n 1)'" ;; esac
 }
 case_flight_no_args() {
   run_script "$1" "$FLIGHT"
   expect_rc 2; expect_out_empty
   [ -n "$ERR" ] || bad "인자 오류의 도움말은 stderr 로 나와야 한다"
+}
+
+# ---- in-flight.sh --peers: 세션 fixture ----
+# 가짜 설정 디렉터리 $PCFG 아래에 세션 파일, 세션 기록, claim 을 둔다. 진짜 ~/.claude 는 건드리지 않는다.
+# 저장소 $PREPO 에는 worktree $PWT 가 하나 걸려 있다. 살아 있는 pid 는 sleep 으로 세운다(procStart "-" 라 alive 가 pid 만 본다).
+PEER_PIDS=()
+peers_setup() {
+  PCFG=$TMP/cfg PREPO=$TMP/repo PWT=$TMP/wt-5
+  rm -rf "$PCFG" "$PREPO" "$PWT"; mkdir -p "$PCFG/sessions" "$PCFG/projects/x" "$PCFG/agent-dispatch/claims" "$PREPO"
+  git -C "$PREPO" init -q -b main && git -C "$PREPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$PREPO" worktree add -q -b feat/5 "$PWT"
+}
+live_pid() { sleep 60 >/dev/null 2>&1 & PEER_PIDS+=("$!"); LIVE=$!; }   # LIVE 에 살아 있는 pid
+dead_pid() { sleep 0 & DEAD=$!; wait "$DEAD"; }                         # DEAD 에 끝난 pid
+peers_teardown() { kill ${PEER_PIDS[@]+"${PEER_PIDS[@]}"} 2>/dev/null; PEER_PIDS=(); }
+# fake_session <pid> <이름> <sessionId> <cwd>
+fake_session() {
+  printf '{"pid":%s,"procStart":"-","name":"%s","sessionId":"%s","cwd":"%s"}\n' "$1" "$2" "$3" "$4" > "$PCFG/sessions/$1.json"
+}
+# fake_transcript <sessionId> <cwd>... -- 세션 기록에 cwd 를 단 줄을 차례로 더한다
+fake_transcript() {
+  local sid=$1 c; shift
+  for c; do printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$c"; done >> "$PCFG/projects/x/$sid.jsonl"
+}
+# fake_claim <파일 이름> <pid> <이름> -- claims/<파일 이름> 에 그 세션이 맡았다는 표시
+fake_claim() {
+  printf '{"pid":%s,"procStart":"-","name":"%s","sessionId":"s-%s"}\n' "$2" "$3" "$2" > "$PCFG/agent-dispatch/claims/$1"
+}
+# run_peers [인자...] -- $PREPO 안에서 in-flight.sh --peers --repo o/r 를 가짜 설정 디렉터리로 돌린다
+run_peers() {
+  RC=0
+  OUT=$(cd "$PREPO" && PATH="$STUB_BIN:$PATH" CLAUDE_CONFIG_DIR=$PCFG timeout 20 bash "$FLIGHT" --peers --repo o/r "$@" 2>"$TMP/se") || RC=$?
+  ERR=$(cat "$TMP/se")
+}
+case_peers_session_cwd() { # 세션 파일의 cwd 가 worktree 아래면 그 세션을 낸다
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-a sa "$PWT/src"
+  run_peers
+  expect_rc 0; expect_out "peer-a"$'\t'"세션 파일 cwd $PWT/src"; expect_err_empty
+  peers_teardown
+}
+case_peers_transcript_cwd() { # 세션 파일 cwd 는 밖이어도 기록의 cwd 가 worktree 면 낸다(이름이 이어 붙은 형제 경로는 아니다)
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-b sb "$TMP/elsewhere"
+  fake_transcript sb "$TMP/elsewhere" "$PWT" "$PWT-other"
+  run_peers
+  expect_rc 0; expect_out "peer-b"$'\t'"기록 cwd $PWT"; expect_err_empty
+  peers_teardown
+}
+case_peers_claim() { # 이 저장소에 대한 claim 이 있으면 낸다(다른 저장소의 claim 은 보지 않는다)
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-c sc "$TMP/elsewhere"
+  fake_claim o_r_5.json "$LIVE" peer-c
+  fake_claim o_r_x_9.json "$LIVE" peer-c
+  run_peers
+  expect_rc 0; expect_out "peer-c"$'\t'"claim #5"; expect_err_empty
+  peers_teardown
+}
+case_peers_excluded() { # 죽은 세션, 자기 세션, 저장소 밖의 세션은 내지 않는다 -- 아무도 없으면 (없음), exit 0
+  peers_setup; live_pid; dead_pid
+  fake_session "$DEAD" peer-dead sd "$PREPO"; fake_transcript sd "$PWT"; fake_claim o_r_5.json "$DEAD" peer-dead
+  fake_session $$ peer-self ss "$PREPO"; fake_transcript ss "$PWT"; fake_claim o_r_6.json $$ peer-self   # 하네스가 in-flight 의 조상이다
+  fake_session "$LIVE" peer-far sf "$TMP/elsewhere"
+  run_peers
+  expect_rc 0; expect_out '(없음)'; expect_err_empty
+  peers_teardown
 }
 
 # ---- 정적 검사 ----
@@ -444,6 +511,10 @@ CASES=(
   'in-flight 77 -> FREE:case_flight_free'
   'in-flight -h -> 헤더 전체, exit 0:case_flight_help native'
   'in-flight 인자 없음 -> exit 2:case_flight_no_args native'
+  'in-flight --peers: 세션 파일 cwd 로 찾는다:case_peers_session_cwd'
+  'in-flight --peers: 기록 cwd 로 찾는다:case_peers_transcript_cwd'
+  'in-flight --peers: claim 으로 찾는다:case_peers_claim'
+  'in-flight --peers: 죽은 세션, 자기 세션은 뺀다:case_peers_excluded'
   '정적 검사: 빈 배열 펼침 없음:case_static_empty_array'
   '정적 검사: 검사기 자체:case_static_detects'
   'wait-prs -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_wait'
