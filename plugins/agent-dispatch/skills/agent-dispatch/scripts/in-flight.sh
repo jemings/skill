@@ -14,11 +14,12 @@
 # 근거: ~/.claude/sessions/<pid>.json(살아 있는 세션 — pid 와 procStart 로 확인), 그 세션 기록
 # ~/.claude/projects/*/<sessionId>.jsonl 의 cwd·사람 지시, git worktree·브랜치, gh 의 열린 PR.
 # 세션 파일의 cwd 는 기동 디렉터리라 worktree 로 옮겨 간 세션을 가리지 못한다 — 그래서 기록의 cwd 를 본다.
+# 헤더 규칙: 도움말(-h)은 2행부터 첫 비주석 줄 직전까지 낸다 — 헤더 안에 빈 줄이나 비주석 줄을 두면 거기서 끊긴다.
 # 필요한 것: bash 4+, jq, git, gh.
 set -euo pipefail
 
 die() { echo "in-flight: $*" >&2; exit 2; }
-usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }
 
 CFG=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 SESS=$CFG/sessions
@@ -32,13 +33,13 @@ while [ $# -gt 0 ]; do
     --repo) repo=${2:?}; shift 2 ;;
     --claim) mode=claim; shift ;;
     --release) mode=release; shift ;;
-    -h|--help) usage ;;
+    -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "모르는 옵션: $1" ;;
     *) break ;;
   esac
 done
-[ $# -gt 0 ] || usage
+[ $# -gt 0 ] || { usage >&2; exit 2; }
 for n; do [[ $n =~ ^[0-9]+$ ]] || die "이슈 번호가 아니다: $n"; done
 command -v jq >/dev/null || die "jq 가 필요하다"
 [ -n "$repo" ] || repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || die "--repo 를 줘라"

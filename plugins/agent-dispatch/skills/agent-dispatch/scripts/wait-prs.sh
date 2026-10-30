@@ -14,11 +14,12 @@
 # 한 회차에 일이 하나라도 있으면 그 회차의 일을 모두 내고 0 으로 끝난다.
 # --timeout(기본 0 = 끝없이)이 지나면 TIMEOUT 을 내고 3 으로 끝난다. 인자가 틀리면 2.
 # Bash 의 백그라운드 실행(run_in_background)으로 띄운다 — 끝나면 harness 가 오케스트레이터를 다시 부른다.
+# 헤더 규칙: 도움말(-h)은 2행부터 첫 비주석 줄 직전까지 낸다 — 헤더 안에 빈 줄이나 비주석 줄을 두면 거기서 끊긴다.
 # 필요한 것: bash 4+, gh. timeout(coreutils)이 있으면 조회 하나를 60초에서 끊는다.
 set -uo pipefail
 
 die() { echo "wait-prs: $*" >&2; exit 2; }
-usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }
 value() { [ -n "${2:-}" ] || die "$1 에 값을 줘라"; }
 
 repo='' interval=${WAIT_PRS_INTERVAL:-60} limit=0 max_fail=${WAIT_PRS_MAX_FAIL:-10}
@@ -29,14 +30,14 @@ while [ $# -gt 0 ]; do
     --interval) value "$@"; interval=$2; shift 2 ;;
     --timeout) value "$@"; limit=$2; shift 2 ;;
     --other) value "$@"; others+=("$2"); shift 2 ;;
-    -h|--help) usage ;;
+    -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "모르는 옵션: $1" ;;
     *) break ;;
   esac
 done
 mine=("$@")
-[ $((${#mine[@]} + ${#others[@]})) -gt 0 ] || usage
+[ $((${#mine[@]} + ${#others[@]})) -gt 0 ] || { usage >&2; exit 2; }
 for n in ${mine[@]+"${mine[@]}"} ${others[@]+"${others[@]}"}; do [[ $n =~ ^[0-9]+$ ]] || die "PR 번호가 아니다: $n"; done
 [[ $interval =~ ^[0-9]+$ && $interval -gt 0 ]] || die "--interval 은 양의 정수다: $interval"
 [[ $limit =~ ^[0-9]+$ ]] || die "--timeout 은 0 이상의 정수다: $limit"
