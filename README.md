@@ -35,7 +35,8 @@ no cross-plugin requirements. `agent-dispatch` drives skills from the external
   `grilling`, `domain-modeling`, `tdd`, and `diagnosing-bugs` skills it hands to
   its subagents. Merging stays with you: it polls its reviewed PRs, and other
   sessions' PRs that block the map, with `gh` in a background shell and resumes
-  when one merges, conflicts, or closes. Before
+  when one merges, conflicts, closes, or gets new review feedback (a review or
+  conversation comment from a non-bot account) on one of its own PRs. Before
   taking an issue it reads the local Claude Code session records
   (`~/.claude/sessions`, `~/.claude/projects`) with `jq` and skips issues another
   live session already holds. The repo should have its triage labels
@@ -112,7 +113,7 @@ cleaned up on the next marketplace sync instead of failing to load.
 
 ```bash
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
-bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh (gh stub, bash:3.2 if docker image exists)
+bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh (gh stub that runs host jq, bash:3.2 if docker image exists)
 ```
 
 ## License
