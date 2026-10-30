@@ -133,7 +133,9 @@ mentions_path() {
 
 # ---- --peers: 같은 저장소의 다른 세션 ----
 if [ "$mode" = peers ]; then
-  git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10)}' > "$tmp/wt"
+  # set -e 아래에서 파이프로 바로 받으면 git 의 실패(128)로 메시지 없이 끝난다 -- 먼저 받아 이유를 낸다
+  wt=$(git worktree list --porcelain 2>/dev/null) || die "git 저장소 안에서 돌려라"
+  printf '%s\n' "$wt" | awk '/^worktree /{print substr($0,10)}' > "$tmp/wt"
   [ -s "$tmp/wt" ] || die "git 저장소 안에서 돌려라"
   # 경로 파일 $1 에서 worktree 의 경로와 같거나 그 아래인 마지막 줄(없으면 exit 1)
   last_in_repo() {
