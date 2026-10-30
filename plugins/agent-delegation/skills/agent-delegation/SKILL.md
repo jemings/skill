@@ -99,7 +99,8 @@ under an allowlist.
 **If interrupted:** do NOT just do it yourself. Diagnose root cause from
 `result.json` `subtype` (`error_max_turns`, permission denials),
 `stderr.log`, cost/turns — then fix the config (raise turns/budget, extend
-the allowlist) and rerun.
+the allowlist) and rerun. The one exception is a child stuck on `git commit`
+after a correct fix — see "Child wedged on the commit" under Pitfalls.
 
 ### Step 3: Verify the PR yourself — never trust the child's report
 
@@ -318,3 +319,13 @@ a merge commit automatically. Where squash is unavailable, `gh pr merge --rebase
   it hits the same fail-closed unless `bun install` ran or you pass
   `LEFTHOOK=0` through the env. Tell the child to use `LEFTHOOK=0 git commit` in
   the task brief if lefthook isn't installed in the worktree.
+- **Child wedged on the commit → finish the mechanical tail yourself.** When
+  the child process is still running ~10+ min after its edits showed up in
+  `git -C <worktree> status --short` and no new commit has landed, it is
+  usually stuck on that lefthook fail-closed, not on the fix — and a
+  re-delegated child wedges the same way. Kill it, read
+  `git -C <worktree> diff`, and run the task file's gates yourself. If they
+  pass, `LEFTHOOK=0 git commit`, push, and open the PR or post the response
+  comment (whichever the child was on), stating there that the child wrote the
+  fix and you finished the commit. Then continue the loop from Step 3.
+  Re-delegate only when the fix itself is wrong.
