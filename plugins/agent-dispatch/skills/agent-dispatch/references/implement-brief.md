@@ -1,6 +1,6 @@
 # 구현 서브에이전트 지시문
 
-`agent-dispatch` 6단계에서 이슈마다 채워 보낸다. `<…>` 를 채우고, 그 이슈의 종류에 맞는 절차 하나만 남긴다.
+`agent-dispatch` 6단계에서 이슈마다 채워 보낸다. `<...>` 를 채우고, 그 이슈의 종류에 맞는 절차 하나만 남긴다.
 리뷰어는 서브에이전트가 띄우지 않는다. 7단계에서 오케스트레이터가 따로 띄운다.
 
 ---
@@ -16,8 +16,8 @@ Respond in <언어>.
 - Work in your own worktree: `<저장소 규칙의 worktree 자리와 브랜치 이름, 예: .claude/worktrees/<N>-<slug>>`, created from the current `origin/<base>`.
 - Put the issue number `<N>` in both the worktree directory name and the branch name. Other sessions recognise work in flight by it.
 - Leave the main checkout and every other tree as they are.
-- <겹침이 있으면: #<M> 도 <파일> 을 바꾼다 — 먼저 병합되는 쪽 위로 rebase 한다.>
-- <이어 하기면 위 첫 줄 대신 이 줄을 남긴다: **Continue existing work.** This issue already has worktree `<경로>` on branch `<브랜치>`<, open PR #<P>><, and merged PR #<Q>>. Work there and leave every other worktree, branch and PR alone. First read the PR body, its review comments, and `git log` since the base. Your request is a follow-up (see "Follow-up requests" below): **<Fix — <고칠 점 목록> / Rebase / Next PR — 계약서의 <k> 번째 PR>**.>
+- <겹침이 있으면: #<M> 도 <파일> 을 바꾼다 -- 먼저 병합되는 쪽 위로 rebase 한다.>
+- <이어 하기면 위 첫 줄 대신 이 줄을 남긴다: **Continue existing work.** This issue already has worktree `<경로>` on branch `<브랜치>`<, open PR #<P>><, and merged PR #<Q>>. Work there and leave every other worktree, branch and PR alone. First read the PR body, its review comments, and `git log` since the base. Your request is a follow-up (see "Follow-up requests" below): **<Fix -- <고칠 점 목록> / Rebase / Next PR -- 계약서의 <k> 번째 PR>**.>
 
 ## Procedure
 
@@ -26,7 +26,7 @@ Respond in <언어>.
 1. Call the Skill tool with "diagnosing-bugs" and follow it.
 2. Even when the contract already names the cause, build the Phase 1 loop. It must go **red** on the reported symptom before you touch the fix.
 3. Write the regression test at the seam the contract names. Show it red on the pre-fix commit and green after the fix.
-4. When there are several defects, use one commit per defect, each with its own red→green.
+4. When there are several defects, use one commit per defect, each with its own red->green.
 
 <그 밖이면 이 절을 남긴다>
 **Implement.**
@@ -42,7 +42,7 @@ Respond in <언어>.
 4. Run the repo's required tests on the exact SHA you will push. If no push hook runs them, run them by hand.
 5. Push and open the PR as the contract says: number of PRs, `Closes`/`Refs`, the passing SHA in the body, and a line `리뷰: 오케스트레이터가 수행`.
    - Open it as a **draft** (`gh pr create --draft`). If the repo's tooling opens it for you, convert it with `gh pr ready --undo` right after.
-   - If drafts are unavailable, start the body with `> ⚠️ 오케스트레이터 검수 전 — 병합하지 마세요.`
+   - If drafts are unavailable, start the body with `> **주의** 오케스트레이터 검수 전 -- 병합하지 마세요.`
    - The orchestrator reviews it, then marks it ready. Merging belongs to the repo's review process.
    - Post no comments, reviews or replies on the PR, and never resolve a thread. Pushing, toggling draft and editing the body are fine. Report to the orchestrator instead.
 

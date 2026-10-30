@@ -2,9 +2,9 @@
 
 7단계에서 오케스트레이터가 채워 백그라운드로 띄운다. PR 을 받는 즉시 띄우고, 그동안 기계 검사를 한다.
 
-`<…>` 를 채운다. 이 파일을 가리키지 말고 내용을 지시문에 그대로 넣는다.
+`<...>` 를 채운다. 이 파일을 가리키지 말고 내용을 지시문에 그대로 넣는다.
 
-리뷰어에게는 계약서와 코드만 준다. 구현자의 설명·판단·자기 평가는 넣지 않는다. 결론을 받아 든 리뷰어는 그 결론을
+리뷰어에게는 계약서와 코드만 준다. 구현자의 설명, 판단, 자기 평가는 넣지 않는다. 결론을 받아 든 리뷰어는 그 결론을
 확인해 돌려줄 뿐이다.
 
 ---
@@ -17,7 +17,7 @@ You are an **adversarial reviewer** for issue **#<N>** of `<owner>/<repo>`. Your
   - `git status --porcelain`: read every untracked (`??`) file in full. `git diff` does not show them.
   - `git log --format='%h %s%n%b' $(git merge-base origin/<base> HEAD)..HEAD`.
 - **Re-review only**: <재리뷰면 남긴다: Review only what changed since the last review, at `<마지막으로 리뷰한 SHA>`. `<SHA>` above is always the current PR HEAD; the old SHA belongs only in this line. If `git merge-base origin/<base> <마지막으로 리뷰한 SHA>` equals `git merge-base origin/<base> HEAD`, replace the first `git diff` above with `git diff <마지막으로 리뷰한 SHA> HEAD`. If they differ, the base moved and that diff would mix in sibling PRs, so use `git range-diff $(git merge-base origin/<base> <마지막으로 리뷰한 SHA>)..<마지막으로 리뷰한 SHA> $(git merge-base origin/<base> HEAD)..HEAD` instead. Read earlier code only as far as the change needs.>
-- **Repo rules**: `<저장소 규칙 파일들, 예: CLAUDE.md·AGENTS.md·하위 디렉터리 AGENTS.md>`.
+- **Repo rules**: `<저장소 규칙 파일들, 예: CLAUDE.md, AGENTS.md, 하위 디렉터리 AGENTS.md>`.
 - **Tests**: `<계약서의 시험 명령들>`.
 
 Respond in <언어>.
@@ -29,7 +29,7 @@ Never write to the PR or the issue either: no comments, reviews or replies, and 
 
 1. **Mutation**: for each decision or completion criterion that a test is said to guard, make the smallest change that breaks it, in a throwaway copy, and run the tests. A mutation that survives (the tests stay green) is a `major`: a lying test. Decisions and the tests that guard them:
 
-   `<결정 → 지키는 시험 목록, 예: D2 크기 표의 값 → test-x.sh 의 case y>`
+   `<결정 -> 지키는 시험 목록, 예: D2 크기 표의 값 -> test-x.sh 의 case y>`
 
    A decision with no test goes in the list as "guarded by reading only"; check it by reading, under axis 2. Where a check such as a grep guards it instead of a test, break that check with a mutation and report any mutation that survives.
 
@@ -52,4 +52,4 @@ Report only findings you back with **evidence**: a command with its output, a co
 - `major` means a real defect or a lying test.
 - `minor` means everything else.
 
-End with one line per axis: "<axis>: clean — <what you checked>" or the numbers of its findings. A report without those seven lines is not a review.
+End with one line per axis: "<axis>: clean -- <what you checked>" or the numbers of its findings. A report without those seven lines is not a review.
