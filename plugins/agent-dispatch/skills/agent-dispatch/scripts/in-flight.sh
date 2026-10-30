@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # in-flight.sh -- 이슈가 이미 누군가의 손에 있는지 본다(agent-dispatch 1, 5, 6단계). 저장소 체크아웃 안에서 돌린다.
+# --peers 는 같은 저장소에서 일하는 다른 세션을 찾는다(1단계 "저장소 도구를 공용화한다").
 #
 #   in-flight.sh [--repo owner/repo] <N>...          판정
 #   in-flight.sh --claim [--repo owner/repo] <N>...  이 세션이 맡았다고 표시한다(같은 PC 의 다른 agent-dispatch 가 본다)
 #   in-flight.sh --release [--repo owner/repo] <N>... 표시를 거둔다
+#   in-flight.sh --peers [--repo owner/repo]         같은 저장소에서 일하는 살아 있는 다른 세션
 #
 # 판정(이슈마다 한 줄, 근거는 그 아래 들여 쓴 줄):
 #   BUSY   살아 있는 다른 세션의 작업 디렉터리(cwd)가 그 이슈의 worktree 이거나, 그 세션이 맡았다고 표시했거나, 열린 PR 이 있다
 #   MAYBE  다른 살아 있는 세션이 그 worktree 경로로 명령을 돌렸거나, 그 세션의 사람 지시에 #N 이 나온다 -- 그 세션에 물어 확인한다
 #   HELD   이슈 번호가 든 worktree, 브랜치가 남아 있는데 그 자리에서 일하는 세션은 없다 -- 남은 것을 들여다본다
 #   FREE   위 어느 것도 없다
+#
+# --peers(세션마다 한 줄 "이름<TAB>근거", 없으면 "(없음)", exit 0. 자기 세션은 뺀다). 근거는 "; " 로 잇는다:
+#   세션 파일 cwd <경로>   세션 파일의 cwd 가 git worktree list 의 경로와 같거나 그 아래다
+#   기록 cwd <경로>        세션 기록의 cwd 가 그렇다(그 가운데 마지막 것)
+#   claim #N              그 세션이 이 저장소의 #N 을 맡았다고 표시했다
 #
 # 근거: ~/.claude/sessions/<pid>.json(살아 있는 세션 -- pid 와 procStart 로 확인), 그 세션 기록
 # ~/.claude/projects/*/<sessionId>.jsonl 의 cwd, 사람 지시, git worktree, 브랜치, gh 의 열린 PR.
@@ -33,13 +40,15 @@ while [ $# -gt 0 ]; do
     --repo) repo=${2:?}; shift 2 ;;
     --claim) mode=claim; shift ;;
     --release) mode=release; shift ;;
+    --peers) mode=peers; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "모르는 옵션: $1" ;;
     *) break ;;
   esac
 done
-[ $# -gt 0 ] || { usage >&2; exit 2; }
+if [ "$mode" = peers ]; then [ $# = 0 ] || die "--peers 는 이슈 번호를 받지 않는다: $*"
+else [ $# -gt 0 ] || { usage >&2; exit 2; }; fi
 for n; do [[ $n =~ ^[0-9]+$ ]] || die "이슈 번호가 아니다: $n"; done
 command -v jq >/dev/null || die "jq 가 필요하다"
 [ -n "$repo" ] || repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || die "--repo 를 줘라"
@@ -60,7 +69,7 @@ while [ -n "$p" ] && [ "$p" -gt 1 ]; do
   p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ') || break
 done
 
-if [ "$mode" != check ]; then
+if [ "$mode" = claim ] || [ "$mode" = release ]; then
   [ -n "$self_pid" ] || die "이 프로세스의 Claude Code 세션을 찾지 못했다"
   mkdir -p "$CLAIMS"
   for n; do
@@ -75,23 +84,25 @@ if [ "$mode" != check ]; then
   exit 0
 fi
 
-git fetch -q --prune origin 2>/dev/null || true
+[ "$mode" = peers ] || git fetch -q --prune origin 2>/dev/null || true
 
-# 살아 있는 다른 세션: 이름, 최근 cwd 목록, 최근 기록 원문, 사람 지시 -- 임시 파일에 한 번만 뽑아 둔다
+# 살아 있는 다른 세션: 이름, pid, 최근 cwd 목록(세션 파일 .scwd, 기록 .tcwd, 둘을 합친 .cwd), 최근 기록 원문, 사람 지시
+# -- 임시 파일에 한 번만 뽑아 둔다
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-names=()
+names=() pids=()
 for f in "$SESS"/*.json; do
   [ -e "$f" ] || continue
   IFS=$'\t' read -r pid pstart name sid < <(jq -r '[.pid, (.procStart // "-"), (.name // "-"), (.sessionId // "-")] | @tsv' "$f") || continue
   [ "$pid" = "$self_pid" ] && continue
   alive "$pid" "$pstart" || continue
-  i=${#names[@]}; names+=("$name")
-  jq -r '.cwd // empty' "$f" > "$tmp/$i.cwd"
+  i=${#names[@]}; names+=("$name"); pids+=("$pid")
+  jq -r '.cwd // empty' "$f" > "$tmp/$i.scwd"
+  : > "$tmp/$i.tcwd"
   t=$(find "$PROJ" -maxdepth 2 -name "$sid.jsonl" -print -quit 2>/dev/null)
   : > "$tmp/$i.cmd"; : > "$tmp/$i.ask"
   if [ -n "$t" ]; then
     tail -n "$TAIL" "$t" > "$tmp/$i.tail"
-    jq -R -r 'fromjson? | .cwd // empty' "$tmp/$i.tail" >> "$tmp/$i.cwd"
+    jq -R -r 'fromjson? | .cwd // empty' "$tmp/$i.tail" > "$tmp/$i.tcwd"
     # 그 세션이 돌린 도구 입력(명령, 경로). 도구 결과는 넣지 않는다 -- `git worktree list` 같은 출력이 모든 경로를 담는다
     jq -R -r 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .input | tostring' \
       "$tmp/$i.tail" > "$tmp/$i.cmd" 2>/dev/null || true
@@ -103,7 +114,7 @@ for f in "$SESS"/*.json; do
                and (test("^(Another Claude session|\\[SYSTEM NOTIFICATION|\\[Subagent hand-back)") | not))' \
       "$t" > "$tmp/$i.ask" 2>/dev/null || true
   fi
-  sort -u -o "$tmp/$i.cwd" "$tmp/$i.cwd"
+  sort -u "$tmp/$i.scwd" "$tmp/$i.tcwd" > "$tmp/$i.cwd"
 done
 
 # $1 파일에 경로 $2 와 같거나 그 아래인 줄이 있나(1193-deps 와 1193-deps-main 을 가른다)
@@ -119,6 +130,41 @@ mentions_path() {
     }
   } END { exit !f }' "$1"
 }
+
+# ---- --peers: 같은 저장소의 다른 세션 ----
+if [ "$mode" = peers ]; then
+  git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10)}' > "$tmp/wt"
+  [ -s "$tmp/wt" ] || die "git 저장소 안에서 돌려라"
+  # 경로 파일 $1 에서 worktree 의 경로와 같거나 그 아래인 마지막 줄(없으면 exit 1)
+  last_in_repo() {
+    awk 'NR == FNR { w[$0]; next } { for (p in w) if ($0 == p || index($0, p "/") == 1) m = $0 }
+         END { if (m == "") exit 1; print m }' "$tmp/wt" "$1"
+  }
+  # 이 저장소의 claim: "pid<TAB>procStart<TAB>N" (다른 저장소 o/r_x 의 o_r_x_9.json 은 N 이 숫자가 아니라 빠진다)
+  : > "$tmp/claims"
+  for cf in "$CLAIMS/${key}"_*.json; do
+    [ -e "$cf" ] || continue
+    cn=${cf##*/}; cn=${cn#"${key}"_}; cn=${cn%.json}
+    [[ $cn =~ ^[0-9]+$ ]] || continue
+    jq -r --arg n "$cn" '[.pid, (.procStart // "-"), $n] | @tsv' "$cf" >> "$tmp/claims" || true
+  done
+  sort -t $'\t' -k3,3n -o "$tmp/claims" "$tmp/claims"
+  found=0
+  for i in "${!names[@]}"; do
+    ev=()
+    if c=$(last_in_repo "$tmp/$i.scwd"); then ev+=("세션 파일 cwd $c"); fi
+    if c=$(last_in_repo "$tmp/$i.tcwd"); then ev+=("기록 cwd $c"); fi
+    while IFS=$'\t' read -r cpid cstart cn; do
+      [ "$cpid" = "${pids[$i]}" ] && alive "$cpid" "$cstart" && ev+=("claim #$cn")
+    done < "$tmp/claims"
+    [ ${#ev[@]} -gt 0 ] || continue
+    found=1 line=
+    for e in ${ev[@]+"${ev[@]}"}; do line+=${line:+; }$e; done
+    printf '%s\t%s\n' "${names[$i]}" "$line"
+  done
+  [ $found = 1 ] || echo '(없음)'
+  exit 0
+fi
 
 verdict=FREE
 up() { case "$verdict:$1" in FREE:*|HELD:MAYBE|HELD:BUSY|MAYBE:BUSY) verdict=$1 ;; esac; }
