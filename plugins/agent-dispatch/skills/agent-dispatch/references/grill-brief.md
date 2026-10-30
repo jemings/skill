@@ -40,7 +40,7 @@ Respond in <언어>, keeping identifiers in their original form.
 4. **용어**: terms that conflict with the glossary or are fuzzy. Propose the precise term.
 5. **본문 수정안**: bullet-level edits that make the issue AFK-ready, as replacement sentences or additions, not a full rewrite.
 
-Tools made: each script you wrote or command sequence you ran by hand more than once, as what / path / times run. "none" is fine. Keep scratch scripts outside the worktree (in the session scratchpad).
+Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run. "none" is fine. Keep scratch scripts outside the worktree (in the session scratchpad).
 
 End with the critical files for implementation. Keep it under ~<1500> words: dense, no preamble.
 
