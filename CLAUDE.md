@@ -36,3 +36,15 @@ Claude Code 스킬을 독립 설치 가능한 플러그인으로 배포하는 �
 ```bash
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh
 ```
+
+## agent-dispatch 스크립트를 고치면 시험 하네스를 돌린다
+
+`plugins/agent-dispatch/skills/agent-dispatch/scripts/` 의 `wait-prs.sh` /
+`in-flight.sh` 를 고쳤다면 커밋 전에 하네스를 돌린다. `gh` 는 스텁으로 갈음하므로
+네트워크가 필요 없고, `bash:3.2` 이미지가 있으면 빈 배열 펼침 같은 하위 bash 회귀도
+컨테이너에서 확인한다(없으면 그 경우만 SKIP). 새 배열을 더했다면 정적 검사가
+길이 확인 없는 펼침을 잡으니 `${a[@]+"${a[@]}"}` 꼴로 쓴다:
+
+```bash
+bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
+```
