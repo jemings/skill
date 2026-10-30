@@ -155,6 +155,14 @@ case_wait_gh_failing() { # 조회가 잇달아 실패하면 gh 의 마지막 오
   WAIT_PRS_MAX_FAIL=1 run_script "$1" "$WAIT" --repo o/r 6
   expect_rc 0; expect_out 'GH_FAILING 6 no stub for PR 6'
 }
+case_wait_bad_repo() { # --repo 가 [HOST/]OWNER/REPO 꼴이 아니면 exit 2
+  local r
+  set_pr 7 OPEN MERGEABLE
+  for r in foo /r o/ a/b/c/d; do
+    run_script native "$WAIT" --repo "$r" --timeout 1 7
+    expect_rc 2; expect_out_empty
+  done
+}
 case_wait_help() {
   run_script "$1" "$WAIT" -h
   expect_rc 0; expect_err_empty
@@ -266,6 +274,7 @@ CASES=(
   'wait-prs --other 5 충돌 → 일이 아니다(TIMEOUT):case_wait_other_conflict_ignored native'
   'wait-prs 한 차례 조회의 일을 모두 낸다:case_wait_together native'
   'wait-prs 조회 실패 → GH_FAILING:case_wait_gh_failing native'
+  'wait-prs --repo 가 틀리면 exit 2:case_wait_bad_repo'
   'wait-prs -h → 헤더 전체, exit 0:case_wait_help native'
   'wait-prs 인자 없음 → exit 2:case_wait_no_args native'
   'in-flight 77 → FREE:case_flight_free'
