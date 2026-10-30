@@ -80,3 +80,4 @@ The orchestrator resolves it and re-dispatches you. Do not file issues yourself.
 - Each completion criterion of the contract: met, with how you checked it. A criterion you met only partly is **not met**; leave its checkbox unchecked and say what is missing.
 - Deviations from the contract and why.
 - Follow-ups: out-of-scope bugs found (each with a reproduction), boundary notes for sibling issues.
+- Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run. "none" is fine. Keep scratch scripts outside the worktree (in the session scratchpad). Repo tools outside the contract are changed only through a tool issue the orchestrator files; do not edit them yourself.
