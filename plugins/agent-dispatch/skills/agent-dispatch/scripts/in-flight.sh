@@ -159,7 +159,7 @@ for n in "$@"; do
     [ -n "$path" ] || continue
     if [[ $(basename "$path") =~ $re ]] || [[ $branch =~ $re ]]; then wts+=("$path"); skip_refs+=("$branch" "origin/$branch"); fi
   done <<< "$wt_lines"
-  for path in "${wts[@]}"; do
+  for path in ${wts[@]+"${wts[@]}"}; do
     held=1
     for i in "${!names[@]}"; do
       if has_path "$tmp/$i.cwd" "$path"; then
@@ -178,7 +178,7 @@ for n in "$@"; do
   while IFS='|' read -r ref when; do
     [ -n "$ref" ] || continue
     [[ ${ref#origin/} =~ $re ]] || continue
-    [[ " ${skip_refs[*]} " == *" $ref "* ]] && continue
+    [[ " ${skip_refs[*]+${skip_refs[*]}} " == *" $ref "* ]] && continue
     up HELD; ev+=("브랜치 $ref (마지막 커밋 $when)")
   done < <(git for-each-ref --format='%(refname:short)|%(committerdate:relative)' refs/heads refs/remotes/origin 2>/dev/null \
            | grep -v -E '^origin/HEAD\|' || true)
@@ -191,5 +191,5 @@ for n in "$@"; do
   done
 
   printf '#%s %s\n' "$n" "$verdict"
-  for e in "${ev[@]}"; do printf '    %s\n' "$e"; done
+  for e in ${ev[@]+"${ev[@]}"}; do printf '    %s\n' "$e"; done
 done

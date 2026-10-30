@@ -14,7 +14,7 @@
 # 한 회차에 일이 하나라도 있으면 그 회차의 일을 모두 내고 0 으로 끝난다.
 # --timeout(기본 0 = 끝없이)이 지나면 TIMEOUT 을 내고 3 으로 끝난다. 인자가 틀리면 2.
 # Bash 의 백그라운드 실행(run_in_background)으로 띄운다 — 끝나면 harness 가 오케스트레이터를 다시 부른다.
-# 필요한 것: bash 4.4+, gh. timeout(coreutils)이 있으면 조회 하나를 60초에서 끊는다.
+# 필요한 것: bash 4+, gh. timeout(coreutils)이 있으면 조회 하나를 60초에서 끊는다.
 set -uo pipefail
 
 die() { echo "wait-prs: $*" >&2; exit 2; }
@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
 done
 mine=("$@")
 [ $((${#mine[@]} + ${#others[@]})) -gt 0 ] || usage
-for n in "${mine[@]}" "${others[@]}"; do [[ $n =~ ^[0-9]+$ ]] || die "PR 번호가 아니다: $n"; done
+for n in ${mine[@]+"${mine[@]}"} ${others[@]+"${others[@]}"}; do [[ $n =~ ^[0-9]+$ ]] || die "PR 번호가 아니다: $n"; done
 [[ $interval =~ ^[0-9]+$ && $interval -gt 0 ]] || die "--interval 은 양의 정수다: $interval"
 [[ $limit =~ ^[0-9]+$ ]] || die "--timeout 은 0 이상의 정수다: $limit"
 [[ $max_fail =~ ^[0-9]+$ && $max_fail -gt 0 ]] || die "WAIT_PRS_MAX_FAIL 은 양의 정수다: $max_fail"
@@ -79,8 +79,8 @@ poll() {
 start=$SECONDS
 while :; do
   events=()
-  for n in "${mine[@]}"; do poll "$n" mine; done
-  for n in "${others[@]}"; do poll "$n" other; done
+  for n in ${mine[@]+"${mine[@]}"}; do poll "$n" mine; done
+  for n in ${others[@]+"${others[@]}"}; do poll "$n" other; done
   if [ ${#events[@]} -gt 0 ]; then
     printf '%s\n' "${events[@]}"
     exit 0
