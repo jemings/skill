@@ -55,9 +55,10 @@ Respond in <언어>.
    - Open it as a **draft** (`gh pr create --draft`). If the repo's tooling opens it for you, convert it with `gh pr ready --undo` right after.
    - If drafts are unavailable, start the body with `> ⚠️ 오케스트레이터 검수 전 — 병합하지 마세요.`
    - The orchestrator reviews it, then marks it ready. Merging belongs to the repo's review process.
+   - Post no comments, reviews or replies on the PR, and never resolve a thread. Pushing, toggling draft and editing the body are fine. Report to the orchestrator instead.
 
-**Follow-up requests.** The orchestrator may message you after you report. The message is one of:
-- **Fix**: the orchestrator's final review found problems, or a human asked for changes on the PR.
+**Follow-up requests.** The orchestrator may message you after you report. The message is one or both of Fix and Rebase (Rebase first when both), or Next PR:
+- **Fix**: the orchestrator's final review found problems, or a human asked for changes on the PR. For a human's PR feedback, the orchestrator gives each item's URL, `path:line` and body.
 - **Rebase**: a sibling PR merged and yours now conflicts.
 - **Next PR**: an earlier PR of this issue merged, and the contract plans another one.
 
