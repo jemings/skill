@@ -7,7 +7,7 @@
 # 경우를 더하는 법:
 #   1. case_<이름>() 함수를 쓴다. 안에서 run_script 로 스크립트를 돌리고 OUT·ERR·RC 를 expect_* 로 대조한다.
 #   2. 아래 CASES 목록에 이름을 적는다.
-#   gh 스텁 응답은 $STUB_DATA 아래 파일로 정한다(set_pr <PR> '<응답 한 줄>', set_pr_list '<json>').
+#   gh 스텁 응답은 $STUB_DATA 아래 파일로 정한다(set_pr <PR> <state> <mergeable> [<리뷰>] [<댓글>], set_pr_list '<json>').
 #   bash:3.2 컨테이너에서도 돌릴 경우는 CASES_32 에 적는다 — run_script 가 알아서 docker 로 돌린다.
 # shellcheck disable=SC2016  # 정적 검사의 시험 입력이 작은따옴표 안의 ${...} 를 담는다
 set -uo pipefail
@@ -23,6 +23,9 @@ STUB_DATA=$TMP/data
 mkdir -p "$STUB_BIN" "$STUB_DATA"
 
 # gh 스텁: 함수가 아니라 실행 파일이다(컨테이너의 busybox timeout 도 실행 파일만 부른다).
+# api graphql 은 fixture(GraphQL 응답 JSON)에 wait-prs.sh 가 넘긴 --jq 프로그램을 실제 jq 로 적용해 낸다.
+# jq 가 없는 bash:3.2 컨테이너에서는 미리 정한 "--jq 적용 뒤 출력"(pr_<PR>.out)으로 갈음한다.
+# 호스트에서 pr_<PR>.out 이 있으면 jq 결과와 대조하고, 다르면 $STUB_DATA/mismatch 에 적는다(run_script 가 실패로 센다).
 cat > "$STUB_BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 d=${STUB_DATA:?}
@@ -30,6 +33,33 @@ case "$1 $2" in
   "pr view")
     [ -f "$d/pr_$3" ] || { echo "no stub for PR $3" >&2; exit 1; }
     cat "$d/pr_$3" ;;
+  "api graphql")
+    shift 2
+    n='' prog='' q=''
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --jq) prog=$2; shift 2 ;;
+        -f|-F) case $2 in number=*) n=${2#number=} ;; query=*) q=${2#query=} ;; esac; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    f=$d/pr_$n.json
+    [ -f "$f" ] || { echo "no stub for PR $n" >&2; exit 1; }
+    printf '%s\n' "$prog" > "$d/jq_$n"; printf '%s\n' "$q" > "$d/query_$n"
+    if ! command -v jq >/dev/null; then
+      [ -f "$d/pr_$n.out" ] || { echo "gh stub: jq 가 없고 pr_$n.out 도 없다" >&2; exit 1; }
+      cat "$d/pr_$n.out"; exit 0
+    fi
+    # gh 처럼: 응답에 errors 가 있으면 본문을 내고 첫 message 를 stderr 로 내며 1 로 끝난다.
+    if jq -e 'has("errors")' "$f" >/dev/null 2>&1; then
+      cat "$f"; echo "gh: $(jq -r '.errors[0].message' "$f")" >&2; exit 1
+    fi
+    out=$(jq -r "$prog" "$f") || exit 1
+    if [ -f "$d/pr_$n.out" ]; then
+      echo "$n" >> "$d/checked"
+      [ "$out" = "$(cat "$d/pr_$n.out")" ] || echo "PR $n: 미리 정한 출력 '$(cat "$d/pr_$n.out")' 이 jq 결과 '$out' 와 다르다" >> "$d/mismatch"
+    fi
+    printf '%s\n' "$out" ;;
   "pr list") if [ -f "$d/pr_list" ]; then cat "$d/pr_list"; else echo '[]'; fi ;;
   "repo view") echo owner/repo ;;
   *) echo "gh stub: 모르는 호출: $*" >&2; exit 1 ;;
@@ -37,8 +67,25 @@ esac
 STUB
 chmod +x "$STUB_BIN/gh"
 
-set_pr() { printf '%s\n' "$2" > "$STUB_DATA/pr_$1"; }
+# set_pr <PR> <state> <mergeable> [<리뷰 nodes JSON> [<대화 댓글 nodes JSON>]] — 그 PR 의 GraphQL 응답 fixture 를 둔다.
+# bash:3.2 용 미리 정한 출력은 피드백 없음("<state> <mergeable>")으로 둔다. 피드백이 있는 fixture 는 set_pr_out 으로 고친다.
+set_pr() {
+  printf '%s %s\n' "$2" "$3" > "$STUB_DATA/pr_$1"
+  printf '{"data":{"repository":{"pullRequest":{"state":"%s","mergeable":"%s","reviews":{"nodes":%s},"comments":{"nodes":%s}}}}}\n' \
+    "$2" "$3" "${4:-[]}" "${5:-[]}" > "$STUB_DATA/pr_$1.json"
+  printf '%s %s\n' "$2" "$3" > "$STUB_DATA/pr_$1.out"
+}
+set_pr_raw() { printf '%s\n' "$2" > "$STUB_DATA/pr_$1.json"; rm -f "$STUB_DATA/pr_$1.out"; }  # <PR> <응답 JSON 그대로>
+set_pr_out() { printf '%s\n' "$2" > "$STUB_DATA/pr_$1.out"; }  # <PR> <bash:3.2 에서 낼 --jq 적용 뒤 출력>
 set_pr_list() { printf '%s\n' "$1" > "$STUB_DATA/pr_list"; }
+# review <state> <submittedAt|null> [<author __typename|null>] · comment <createdAt> [<isMinimized>] [<author __typename|null>]
+# — fixture 의 nodes 한 칸. author 를 null 로 주면 지운 계정이다.
+author_json() { if [ "$1" = null ]; then printf null; else printf '{"__typename":"%s"}' "$1"; fi; }
+review() {
+  local at=null; [ "$2" = null ] || at="\"$2\""
+  printf '{"state":"%s","submittedAt":%s,"author":%s}' "$1" "$at" "$(author_json "${3:-User}")"
+}
+comment() { printf '{"createdAt":"%s","isMinimized":%s,"author":%s}' "$1" "${2:-false}" "$(author_json "${3:-User}")"; }
 
 PASS=0 FAIL=0 SKIP=0
 OUT='' ERR='' RC=0
@@ -68,19 +115,45 @@ run_script() {
   fi
   RC=$?
   OUT=$(cat "$so"); ERR=$(cat "$se")
+  if [ -f "$STUB_DATA/mismatch" ]; then bad "$(cat "$STUB_DATA/mismatch")"; fi
 }
 export STUB_DATA WAIT_PRS_INTERVAL=1 WAIT_PRS_MAX_FAIL=10
 
 # ---- wait-prs.sh ----
 case_wait_other_merged() { # via
-  set_pr 5 'MERGED UNKNOWN'
+  set_pr 5 MERGED UNKNOWN
   run_script "$1" "$WAIT" --repo o/r --other 5
   expect_rc 0; expect_out 'MERGED 5'
 }
 case_wait_mine_conflicting() {
-  set_pr 7 'OPEN CONFLICTING'
+  set_pr 7 OPEN CONFLICTING
   run_script "$1" "$WAIT" --repo o/r 7
   expect_rc 0; expect_out 'CONFLICTING 7'
+}
+case_wait_mine_merged() {
+  set_pr 7 MERGED UNKNOWN
+  run_script "$1" "$WAIT" --repo o/r 7
+  expect_rc 0; expect_out 'MERGED 7'
+}
+case_wait_mine_closed() {
+  set_pr 7 CLOSED UNKNOWN
+  run_script "$1" "$WAIT" --repo o/r 7
+  expect_rc 0; expect_out 'CLOSED 7'
+}
+case_wait_other_conflict_ignored() { # 남의 PR 의 충돌은 일이 아니다 — 아무 일 없이 --timeout 이 지난다
+  set_pr 5 OPEN CONFLICTING
+  run_script "$1" "$WAIT" --repo o/r --timeout 1 --other 5
+  expect_rc 3; expect_out 'TIMEOUT'
+}
+case_wait_together() { # 한 차례 조회에 생긴 일을 모두 낸다
+  set_pr 7 OPEN CONFLICTING
+  set_pr 5 MERGED UNKNOWN
+  run_script "$1" "$WAIT" --repo o/r --other 5 7
+  expect_rc 0; expect_out $'CONFLICTING 7\nMERGED 5'
+}
+case_wait_gh_failing() { # 조회가 잇달아 실패하면 gh 의 마지막 오류 한 줄을 이유로 낸다
+  WAIT_PRS_MAX_FAIL=1 run_script "$1" "$WAIT" --repo o/r 6
+  expect_rc 0; expect_out 'GH_FAILING 6 no stub for PR 6'
 }
 case_wait_help() {
   run_script "$1" "$WAIT" -h
@@ -180,6 +253,7 @@ case_hdr_blank_flight() { case_header_mid_blank "$FLIGHT"; }
 run_case() { # <표시 이름> <함수> [인자...]
   local label=$1; shift
   CASE=$label BAD=0
+  rm -rf "$STUB_DATA"; mkdir -p "$STUB_DATA"   # 앞 경우의 fixture 가 남지 않게
   "$@"
   if [ $BAD = 0 ]; then PASS=$((PASS + 1)); printf 'PASS %s\n' "$label"; else FAIL=$((FAIL + 1)); fi
 }
@@ -187,6 +261,11 @@ run_case() { # <표시 이름> <함수> [인자...]
 CASES=(
   'wait-prs --other 5 → MERGED 5:case_wait_other_merged native'
   'wait-prs 7 → CONFLICTING 7:case_wait_mine_conflicting native'
+  'wait-prs 7 → MERGED 7:case_wait_mine_merged native'
+  'wait-prs 7 → CLOSED 7:case_wait_mine_closed native'
+  'wait-prs --other 5 충돌 → 일이 아니다(TIMEOUT):case_wait_other_conflict_ignored native'
+  'wait-prs 한 차례 조회의 일을 모두 낸다:case_wait_together native'
+  'wait-prs 조회 실패 → GH_FAILING:case_wait_gh_failing native'
   'wait-prs -h → 헤더 전체, exit 0:case_wait_help native'
   'wait-prs 인자 없음 → exit 2:case_wait_no_args native'
   'in-flight 77 → FREE:case_flight_free'
