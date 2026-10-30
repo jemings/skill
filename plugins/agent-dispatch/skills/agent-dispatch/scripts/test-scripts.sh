@@ -372,12 +372,15 @@ fake_transcript() {
 fake_claim() {
   printf '{"pid":%s,"procStart":"-","name":"%s","sessionId":"s-%s"}\n' "$2" "$3" "$2" > "$PCFG/agent-dispatch/claims/$1"
 }
-# run_peers [인자...] -- $PREPO 안에서 in-flight.sh --peers --repo o/r 를 가짜 설정 디렉터리로 돌린다
-run_peers() {
+# run_flight_at <디렉터리> [인자...] -- 그 디렉터리 안에서 in-flight.sh 를 가짜 설정 디렉터리 $PCFG 로 돌린다
+run_flight_at() {
+  local dir=$1; shift
   RC=0
-  OUT=$(cd "$PREPO" && PATH="$STUB_BIN:$PATH" CLAUDE_CONFIG_DIR=$PCFG timeout 20 bash "$FLIGHT" --peers --repo o/r "$@" 2>"$TMP/se") || RC=$?
+  OUT=$(cd "$dir" && PATH="$STUB_BIN:$PATH" CLAUDE_CONFIG_DIR=$PCFG timeout 20 bash "$FLIGHT" "$@" 2>"$TMP/se") || RC=$?
   ERR=$(cat "$TMP/se")
 }
+# run_peers [인자...] -- $PREPO 안에서 in-flight.sh --peers --repo o/r 를 돌린다
+run_peers() { run_flight_at "$PREPO" --peers --repo o/r "$@"; }
 case_peers_session_cwd() { # 세션 파일의 cwd 가 worktree 아래면 그 세션을 낸다
   peers_setup; live_pid
   fake_session "$LIVE" peer-a sa "$PWT/src"
@@ -410,6 +413,47 @@ case_peers_excluded() { # 죽은 세션, 자기 세션, 저장소 밖의 세션�
   run_peers
   expect_rc 0; expect_out '(없음)'; expect_err_empty
   peers_teardown
+}
+case_peers_main_checkout() { # 세션 파일 cwd 가 주 체크아웃(git worktree list 의 첫 줄)이어도 낸다
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-m sm "$PREPO"
+  run_peers
+  expect_rc 0; expect_out "peer-m"$'\t'"세션 파일 cwd $PREPO"; expect_err_empty
+  peers_teardown
+}
+case_peers_rejects_number() { # --peers 는 이슈 번호를 받지 않는다
+  peers_setup
+  run_peers 5
+  expect_rc 2; expect_out_empty
+  [ -n "$ERR" ] || bad "stderr 에 이유가 없다"
+}
+case_peers_outside_git() { # 체크아웃 밖에서 돌리면 이유를 stderr 에 내고 exit 2
+  peers_setup; rm -rf "$TMP/nogit"; mkdir -p "$TMP/nogit"
+  run_flight_at "$TMP/nogit" --peers --repo o/r
+  expect_rc 2; expect_out_empty
+  [ -n "$ERR" ] || bad "stderr 에 이유가 없다"
+}
+# 판정 모드와 --release 도 --peers 가 고친 세션 수집(.cwd 조립)과 모드 분기를 쓴다 -- 그 회귀를 지킨다
+case_flight_busy_transcript_cwd() { # 기록 cwd 가 그 이슈의 worktree 면 BUSY
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-b sb "$TMP/elsewhere"; fake_transcript sb "$PWT"
+  run_flight_at "$PREPO" --repo o/r 5
+  expect_rc 0; expect_out_has '#5 BUSY'; expect_out_has "세션 peer-b 이 worktree $PWT 에서 일한다"
+  peers_teardown
+}
+case_flight_busy_session_cwd() { # 세션 파일 cwd 가 그 이슈의 worktree 면 BUSY
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-s ss2 "$PWT"
+  run_flight_at "$PREPO" --repo o/r 5
+  expect_rc 0; expect_out_has '#5 BUSY'; expect_out_has "세션 peer-s 이 worktree $PWT 에서 일한다"
+  peers_teardown
+}
+case_flight_release() { # --release 는 판정으로 새지 않고 표시를 지운다
+  peers_setup
+  fake_session $$ me sme "$PREPO"; fake_claim o_r_5.json $$ me   # 하네스가 in-flight 의 조상이다
+  run_flight_at "$PREPO" --release --repo o/r 5
+  expect_rc 0; expect_out 'released #5'; expect_err_empty
+  [ ! -e "$PCFG/agent-dispatch/claims/o_r_5.json" ] || bad "claim 파일이 남았다"
 }
 
 # ---- 정적 검사 ----
@@ -515,6 +559,12 @@ CASES=(
   'in-flight --peers: 기록 cwd 로 찾는다:case_peers_transcript_cwd'
   'in-flight --peers: claim 으로 찾는다:case_peers_claim'
   'in-flight --peers: 죽은 세션, 자기 세션은 뺀다:case_peers_excluded'
+  'in-flight --peers: 주 체크아웃의 세션도 낸다:case_peers_main_checkout'
+  'in-flight --peers 5 -> exit 2:case_peers_rejects_number'
+  'in-flight --peers 를 git 밖에서 -> 이유와 exit 2:case_peers_outside_git'
+  'in-flight 5: 기록 cwd 가 worktree -> BUSY:case_flight_busy_transcript_cwd'
+  'in-flight 5: 세션 파일 cwd 가 worktree -> BUSY:case_flight_busy_session_cwd'
+  'in-flight --release 5 -> 표시를 지운다:case_flight_release'
   '정적 검사: 빈 배열 펼침 없음:case_static_empty_array'
   '정적 검사: 검사기 자체:case_static_detects'
   'wait-prs -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_wait'
