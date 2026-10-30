@@ -43,7 +43,7 @@
     {
       "name": "agent-dispatch",
       "source": "./plugins/agent-dispatch",
-      "description": "Advance a map issue's frontier: subagents self-grill every startable needs-triage sub-issue, the orchestrator decides what evidence settles and asks the human the rest, rewrites each issue as a ready-for-agent contract, dispatches implement or diagnosing-bugs subagents that open draft PRs, runs an adversarial reviewer in parallel with its final review of each PR, and keeps going as PRs merge until the map is done."
+      "description": "Advance the frontier of a map issue, or of a condition-defined issue set (label, author): subagents self-grill every startable needs-triage sub-issue, the orchestrator decides what evidence settles and asks the human the rest, rewrites each issue as a ready-for-agent contract, dispatches implement or diagnosing-bugs subagents that open draft PRs, runs an adversarial reviewer in parallel with its final review of each PR, and keeps going as PRs merge until the scope is done, putting defects it files along the way straight into the frontier."
     }
   ],
   "renames": {
