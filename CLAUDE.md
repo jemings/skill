@@ -49,6 +49,14 @@ bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh
 bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
 ```
 
+경우 하나를 고쳐 다시 볼 때는 `ONLY='<ERE>'` 로 라벨(`PASS`/`FAIL` 줄의 글)이 맞는
+경우만 돌린다(맞는 것이 없으면 exit 1, ERE 가 올바르지 않으면 exit 2). 리뷰의 변이
+확인은 손으로 사본을 고치지 말고 `MUTATE='in-flight.sh:s/exit 2/exit 1/'
+ONLY='git 밖'` 처럼 쓴다. `$TMP` 의 사본에만 변이를 걸어 원본은 그대로이고, FAIL 이
+있으면 `MUTANT KILLED`(exit 0), 없으면 `MUTANT SURVIVED`(exit 1, 거짓 시험)이다.
+변이가 틀렸거나 아무것도 안 바꿨거나 돈 경우가 없으면(`MUTATE` 와 함께 `ONLY` 에
+맞는 것이 없을 때도) exit 2 다.
+
 ## agent-dispatch 는 문장부호를 ASCII 로 쓴다
 
 `agent-dispatch` 의 사내 배포 사본은 원본과 바이트 단위로 같아야 동기화가 쉽다.
