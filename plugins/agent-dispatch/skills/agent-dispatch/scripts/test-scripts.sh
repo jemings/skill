@@ -516,6 +516,144 @@ case_hdr_comment_flight() { case_header_mid_comment "$FLIGHT"; }
 case_hdr_blank_wait() { case_header_mid_blank "$WAIT"; }
 case_hdr_blank_flight() { case_header_mid_blank "$FLIGHT"; }
 
+# ---- 하네스 자신: ONLY, MUTATE ----
+# 변이하지 않은 원본 하네스($SCRIPTS/test-scripts.sh)를 다시 불러 OUT/ERR/RC 를 채운다. 바깥의 ONLY/MUTATE 가 새어 들지 않게
+# 안쪽 실행은 둘을 언제나 명시적으로 준다(없앨 것은 env -u). 안쪽의 ONLY 는 이 절의 경우에 맞지 않는 라벨로 골라야 같은 경우가 또 돌지 않는다.
+# SELF_DOCKER=none|fake 이면 안쪽 PATH 앞에 docker 스텁을 둔다: none 은 이미지가 없는 호스트(docker 가 exit 1), fake 는 이미지가 있고
+# `docker run` 이 컨테이너 없이 같은 bash 로 스크립트를 돌리는 호스트다. 그래서 호스트와 상관없이 두 분기를 모두 본다.
+make_docker_stub() { # <none|fake>
+  local d=$TMP/dstub_$1
+  mkdir -p "$d"
+  if [ "$1" = none ]; then printf '#!/bin/sh\nexit 1\n' > "$d/docker"; else cat > "$d/docker" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = image ] && exit 0
+[ "$1" = run ] || exit 1
+shift; wd=.
+while [ $# -gt 0 ]; do
+  case $1 in
+    -w) wd=$2; shift 2 ;;
+    -e) case $2 in *=*) export "$2" ;; esac; shift 2 ;;
+    -v|--network) shift 2 ;;
+    bash:3.2) shift; break ;;
+    *) shift ;;
+  esac
+done
+cd "$wd" && exec "$@"
+STUB
+  fi
+  chmod +x "$d/docker"
+}
+# HARNESS_INNER 는 안쪽 실행의 표시다: 안쪽에서 이 절의 경우가 돌면 끝없이 불러 대지 않고 바로 실패한다.
+run_self() { # <ONLY|빈 문자열> [<MUTATE>]
+  local -a e=(-u ONLY -u MUTATE HARNESS_INNER=1)
+  OUT='' ERR='' RC=0
+  if [ -n "${HARNESS_INNER:-}" ]; then bad "안쪽 실행에서 하네스 자신을 다시 불렀다(ONLY 가 이 절의 경우를 거르지 못했다)"; return; fi
+  [ -z "${SELF_DOCKER:-}" ] || { make_docker_stub "$SELF_DOCKER"; e+=("PATH=$TMP/dstub_$SELF_DOCKER:$PATH"); }
+  [ -n "$1" ] && e+=("ONLY=$1")
+  [ -n "${2:-}" ] && e+=("MUTATE=$2")
+  env "${e[@]}" timeout 600 bash "$SCRIPTS/test-scripts.sh" >"$TMP/self_so" 2>"$TMP/self_se" || RC=$?
+  OUT=$(cat "$TMP/self_so"); ERR=$(cat "$TMP/self_se")
+}
+count_lines() { printf '%s\n' "$OUT" | grep -c "$1" || true; }  # OUT 에서 정규식(BRE)에 맞는 줄 수
+orig_sum() { cksum "$SCRIPTS/wait-prs.sh" "$SCRIPTS/in-flight.sh"; }
+ONE='^in-flight 77 -> FREE$'   # 값싼 경우 하나의 라벨
+
+case_only_one() {
+  run_self "$ONE"
+  expect_rc 0
+  [ "$(count_lines '^PASS ')" = 1 ] || bad "PASS 줄이 하나여야 한다: '$OUT'"
+  expect_out_has 'PASS in-flight 77 -> FREE'
+  [ "$(count_lines '^FAIL \|^SKIP ')" = 0 ] || bad "FAIL/SKIP 줄이 없어야 한다: '$OUT'"
+  expect_out_has '1 passed, 0 failed, 0 skipped'
+}
+case_only_no_match() {
+  run_self '^맞는-경우-없음$'
+  expect_rc 1
+  [ -n "$ERR" ] || bad "맞는 항목이 없을 때 stderr 에 이유가 있어야 한다"
+  [ "$(count_lines '^PASS \|^FAIL \|^SKIP ')" = 0 ] || bad "PASS/FAIL/SKIP 줄이 없어야 한다: '$OUT'"
+}
+case_only_bad_ere() { # ONLY 가 올바른 ERE 가 아니면 exit 2 와 이유 (맞는 것 없음의 exit 1 과 구별)
+  run_self '('
+  expect_rc 2
+  case $ERR in *'올바른 정규식'*) ;; *) bad "stderr 에 '올바른 정규식' 이 있어야 한다: '$ERR'" ;; esac
+  [ "$(count_lines '^PASS \|^FAIL \|^SKIP ')" = 0 ] || bad "PASS/FAIL/SKIP 줄이 없어야 한다: '$OUT'"
+}
+case_only_32() { # bash:3.2 경우만 고르면: 이미지가 없으면 SKIP 한 번, 있으면 PASS
+  local pat='^bash:3\.2 wait-prs 7 -> CONFLICTING 7$'
+  SELF_DOCKER=none run_self "$pat"
+  expect_rc 0
+  [ "$(count_lines '^SKIP bash:3.2 (이미지 없음)$')" = 1 ] || bad "이미지가 없으면 SKIP 줄이 한 번이어야 한다: '$OUT'"
+  expect_out_has '0 passed, 0 failed, 1 skipped'
+  SELF_DOCKER=fake run_self "$pat"
+  expect_rc 0
+  expect_out_has 'PASS bash:3.2 wait-prs 7 -> CONFLICTING 7'; expect_out_has '1 passed, 0 failed, 0 skipped'
+  [ "$(count_lines '^SKIP ')" = 0 ] || bad "이미지가 있으면 SKIP 줄이 없어야 한다: '$OUT'"
+}
+case_only_32_unselected_no_skip() { # bash:3.2 경우를 하나도 고르지 않으면 이미지가 없어도 SKIP 줄이 없다
+  SELF_DOCKER=none run_self "$ONE"
+  expect_rc 0
+  [ "$(count_lines '^SKIP ')" = 0 ] || bad "SKIP 줄이 없어야 한다: '$OUT'"
+}
+case_mutate_killed() {
+  local before; before=$(orig_sum)
+  run_self "$ONE" 'in-flight.sh:s/FREE/XFREE/'
+  expect_rc 0; expect_out_has 'MUTANT KILLED'
+  [ "$(count_lines '^FAIL in-flight 77 -> FREE')" = 1 ] || bad "죽인 경우의 FAIL 줄이 있어야 한다: '$OUT'"
+  [ "$(orig_sum)" = "$before" ] || bad "원본 스크립트가 바뀌었다"
+}
+case_mutate_survived() { # 주석 줄만 바꾼다
+  local before; before=$(orig_sum)
+  run_self "$ONE" 'in-flight.sh:s/$/ x/ if $. == 2'
+  expect_rc 1; expect_out_has 'MUTANT SURVIVED'
+  expect_out_has '1 passed, 0 failed, 0 skipped'
+  [ "$(orig_sum)" = "$before" ] || bad "원본 스크립트가 바뀌었다"
+}
+case_mutate_noop() {
+  local before; before=$(orig_sum)
+  run_self "$ONE" 'in-flight.sh:s/이_글은_스크립트에_없다/x/'
+  expect_rc 2; [ -n "$ERR" ] || bad "stderr 에 이유가 있어야 한다"
+  [ "$(count_lines '^PASS \|^FAIL \|MUTANT')" = 0 ] || bad "경우를 돌거나 판정을 냈다: '$OUT'"
+  [ "$(orig_sum)" = "$before" ] || bad "원본 스크립트가 바뀌었다"
+}
+case_mutate_bad_input() { # 대상이 틀리거나, ':' 가 없거나, perl 식이 틀리면 exit 2 와 그 이유
+  local m why
+  for m in 'other.sh:s/a/b/|대상은' 'in-flight.sh|꼴이어야' 'in-flight.sh:s/(/x/|perl 식이 실패'; do
+    why=${m##*|}; m=${m%|*}
+    run_self "$ONE" "$m"
+    [ "$RC" = 2 ] || bad "MUTATE='$m' 는 exit 2 여야 하는데 $RC"
+    case $ERR in *"$why"*) ;; *) bad "MUTATE='$m' 의 stderr 에 '$why' 가 있어야 한다: '$ERR'" ;; esac
+    [ "$(count_lines '^PASS \|MUTANT')" = 0 ] || bad "MUTATE='$m' 가 경우를 돌았다: '$OUT'"
+  done
+}
+case_mutate_wait_native() { # wait-prs.sh 대상: 출력되는 일 이름만 바꿔 네이티브 경우를 죽인다
+  local before; before=$(orig_sum)
+  run_self '^wait-prs 7 -> CONFLICTING 7$' 'wait-prs.sh:s/events\+=\("CONFLICTING \$n"\)/events+=("XCONFLICTING \$n")/'
+  expect_rc 0; expect_out_has 'MUTANT KILLED'
+  [ "$(count_lines '^FAIL wait-prs 7 -> CONFLICTING 7')" = 1 ] || bad "죽인 경우의 FAIL 줄이 있어야 한다: '$OUT'"
+  [ "$(orig_sum)" = "$before" ] || bad "원본 스크립트가 바뀌었다"
+}
+case_mutate_wait_docker() { # docker 경로도 사본을 돈다: bash:3.2 경우를 죽인다. 이미지가 없어 아무 경우도 못 돌면 exit 2
+  local pat='^bash:3\.2 wait-prs 7 -> CONFLICTING 7$' m='wait-prs.sh:s/events\+=\("CONFLICTING \$n"\)/events+=("XCONFLICTING \$n")/'
+  SELF_DOCKER=fake run_self "$pat" "$m"
+  expect_rc 0; expect_out_has 'MUTANT KILLED'
+  [ "$(count_lines '^FAIL bash:3.2 wait-prs 7 -> CONFLICTING 7')" = 1 ] || bad "죽인 경우의 FAIL 줄이 있어야 한다: '$OUT'"
+  SELF_DOCKER=none run_self "$pat" "$m"
+  expect_rc 2; expect_out_has 'SKIP bash:3.2 (이미지 없음)'
+  case $ERR in *'아무 경우도 돌지 않았다'*) ;; *) bad "stderr 에 이유가 있어야 한다: '$ERR'" ;; esac
+  case $OUT in *MUTANT*) bad "판정을 내면 안 된다: '$OUT'" ;; esac
+}
+case_mutate_no_match() { # MUTATE 일 때 ONLY 에 맞는 것이 없으면 exit 2 (MUTATE 없이는 exit 1)
+  run_self '^맞는-경우-없음$' 'in-flight.sh:s/FREE/XFREE/'
+  expect_rc 2; [ -n "$ERR" ] || bad "stderr 에 이유가 있어야 한다"
+  case $OUT in *MUTANT*) bad "판정을 내면 안 된다: '$OUT'" ;; esac
+}
+case_mutate_static_sees_copy() { # 정적 검사도 변이한 사본을 읽는다: 둘째 줄을 길이 확인 없는 펼침으로 바꾼다
+  local before; before=$(orig_sum)
+  run_self '^정적 검사: 빈 배열 펼침 없음$' 'in-flight.sh:s/^#.*/y=\$\{b[*]\}/ if $. == 2'
+  expect_rc 0; expect_out_has 'MUTANT KILLED'
+  [ "$(orig_sum)" = "$before" ] || bad "원본 스크립트가 바뀌었다"
+}
+
 # ---- 실행 ----
 run_case() { # <표시 이름> <함수> [인자...]
   local label=$1; shift
@@ -571,6 +709,19 @@ CASES=(
   'in-flight -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_flight'
   'wait-prs -h -> 헤더 중간의 빈 줄에서 끊긴다:case_hdr_blank_wait'
   'in-flight -h -> 헤더 중간의 빈 줄에서 끊긴다:case_hdr_blank_flight'
+  'ONLY=<라벨> -> 그 경우 하나만 돈다:case_only_one'
+  'ONLY=<맞는 것 없음> -> exit 1 과 이유:case_only_no_match'
+  'ONLY 가 bash:3.2 경우만 고르면 PASS 나 SKIP 한 번:case_only_32'
+  'ONLY 가 bash:3.2 경우를 안 고르면 SKIP 줄이 없다:case_only_32_unselected_no_skip'
+  'MUTATE 가 경우를 죽이면 MUTANT KILLED, exit 0:case_mutate_killed'
+  'MUTATE 가 주석만 바꾸면 MUTANT SURVIVED, exit 1:case_mutate_survived'
+  'MUTATE 가 아무것도 안 바꾸면 exit 2:case_mutate_noop'
+  'MUTATE 의 대상, 형식, perl 식이 틀리면 exit 2:case_mutate_bad_input'
+  'MUTATE 의 변이를 정적 검사도 본다:case_mutate_static_sees_copy'
+  'MUTATE 가 wait-prs.sh 사본의 네이티브 경우를 죽인다:case_mutate_wait_native'
+  'MUTATE 가 docker 경로의 사본도 돌고, 못 돌면 exit 2:case_mutate_wait_docker'
+  'MUTATE 일 때 ONLY 에 맞는 것이 없으면 exit 2:case_mutate_no_match'
+  'ONLY 가 올바른 ERE 가 아니면 exit 2 와 이유:case_only_bad_ere'
 )
 # bash:3.2 컨테이너에서 같은 경우를 돌린다(3.2 의 빈 배열 동작은 4.0~4.3 과 같다)
 CASES_32=(
