@@ -3,6 +3,10 @@
 #
 # 실행:
 #   bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
+#   ONLY='in-flight --peers' bash .../test-scripts.sh    라벨(PASS/FAIL 줄의 글)이 ERE 에 맞는 경우만 돈다. 맞는 것이 없으면 exit 1(MUTATE 와 함께면 exit 2), ERE 가 틀리면 exit 2
+#   MUTATE='in-flight.sh:s/exit 2/exit 1/' ONLY='git 밖' bash .../test-scripts.sh
+#                                                        $TMP 의 사본에 perl 변이를 걸고 돈다(원본은 그대로). FAIL 이 있으면
+#                                                        MUTANT KILLED(exit 0), 없으면 MUTANT SURVIVED(exit 1), 변이 오류, 무변경, 돈 경우 없음은 exit 2
 #
 # 경우를 더하는 법:
 #   1. case_<이름>() 함수를 쓴다. 안에서 run_script 로 스크립트를 돌리고 OUT/ERR/RC 를 expect_* 로 대조한다.
@@ -22,6 +26,22 @@ trap 'kill ${PEER_PIDS[@]+"${PEER_PIDS[@]}"} 2>/dev/null; rm -rf "$TMP"' EXIT
 STUB_BIN=$TMP/bin
 STUB_DATA=$TMP/data
 mkdir -p "$STUB_BIN" "$STUB_DATA"
+
+# MUTATE='<스크립트 이름>:<perl 식>' -- 두 스크립트를 $TMP 로 복사하고 대상 사본에만 perl 식을 건다. 원본은 건드리지 않는다.
+# 정적 검사와 docker 경로도 WAIT/FLIGHT 를 거치므로 사본을 본다($TMP 는 컨테이너에 마운트된다).
+if [ -n "${MUTATE:-}" ]; then
+  case $MUTATE in
+    *:*) m_target=${MUTATE%%:*}; m_expr=${MUTATE#*:} ;;
+    *) echo "MUTATE 는 '<스크립트 이름>:<perl 식>' 꼴이어야 한다: '$MUTATE'" >&2; exit 2 ;;
+  esac
+  case $m_target in wait-prs.sh|in-flight.sh) ;; *) echo "MUTATE 의 대상은 wait-prs.sh 나 in-flight.sh 여야 한다: '$m_target'" >&2; exit 2 ;; esac
+  mkdir -p "$TMP/mutant"
+  cp "$WAIT" "$FLIGHT" "$TMP/mutant/"
+  timeout 30 perl -pi -e "$m_expr" "$TMP/mutant/$m_target" || { echo "MUTATE 의 perl 식이 실패했거나 30초를 넘겼다: '$m_expr'" >&2; exit 2; }
+  if cmp -s "$SCRIPTS/$m_target" "$TMP/mutant/$m_target"; then echo "변이가 아무것도 바꾸지 않았다: '$MUTATE'" >&2; exit 2; fi
+  WAIT=$TMP/mutant/wait-prs.sh
+  FLIGHT=$TMP/mutant/in-flight.sh
+fi
 
 # gh 스텁: 함수가 아니라 실행 파일이다(컨테이너의 busybox timeout 도 실행 파일만 부른다).
 # api graphql 은 fixture(GraphQL 응답 JSON)에 wait-prs.sh 가 넘긴 --jq 프로그램을 실제 jq 로 적용해 낸다.
@@ -119,7 +139,7 @@ run_script() {
   local via=$1 script=$2; shift 2
   local so=$TMP/so se=$TMP/se
   if [ "$via" = docker ]; then
-    timeout 60 docker run --rm --network none -v "$TMP:$TMP" -v "$SCRIPTS:$SCRIPTS:ro" -w "$TMP" \
+    timeout -k 5 60 docker run --rm --init --network none -v "$TMP:$TMP" -v "$SCRIPTS:$SCRIPTS:ro" -w "$TMP" \
       -e STUB_DATA -e WAIT_PRS_INTERVAL -e WAIT_PRS_MAX_FAIL \
       -e PATH="$STUB_BIN:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
       bash:3.2 bash "$script" "$@" >"$so" 2>"$se"
@@ -730,20 +750,39 @@ CASES_32=(
   'wait-prs 피드백: --since 와 --other 를 함께:case_fb_since_32'
 )
 
+# ONLY=<ERE> -- 라벨(PASS/FAIL 줄에 찍히는 글)이 맞는 경우만 돈다. 배열은 그대로 두고 루프에서 거른다.
+selected() { [ -z "${ONLY:-}" ] || [[ $1 =~ $ONLY ]]; }
+n_sel=0 n_sel32=0
+if [ -n "${ONLY:-}" ]; then
+  [[ x =~ $ONLY ]]; [ $? != 2 ] || { echo "ONLY 가 올바른 정규식이 아니다: '$ONLY'" >&2; exit 2; }
+  for c in "${CASES[@]}"; do selected "${c%%:case_*}" && n_sel=$((n_sel + 1)); done
+  for c in "${CASES_32[@]}"; do selected "bash:3.2 ${c%%:case_*}" && n_sel32=$((n_sel32 + 1)); done
+  if [ $((n_sel + n_sel32)) = 0 ]; then echo "ONLY 에 맞는 경우가 없다: '$ONLY'" >&2; [ -z "${MUTATE:-}" ] && exit 1; exit 2; fi
+fi
+
 for c in "${CASES[@]}"; do
   label=${c%%:case_*}; rest=case_${c#*:case_}
+  selected "$label" || continue
   # shellcheck disable=SC2086
   run_case "$label" $rest
 done
 
-if docker image inspect bash:3.2 >/dev/null 2>&1; then
-  for c in "${CASES_32[@]}"; do
-    label=${c%%:case_*}; rest=case_${c#*:case_}
-    run_case "bash:3.2 $label" "$rest" docker
-  done
-else
-  SKIP=$((SKIP + 1)); echo 'SKIP bash:3.2 (이미지 없음)'
+if [ -z "${ONLY:-}" ] || [ "$n_sel32" -gt 0 ]; then
+  if docker image inspect bash:3.2 >/dev/null 2>&1; then
+    for c in "${CASES_32[@]}"; do
+      label=${c%%:case_*}; rest=case_${c#*:case_}
+      selected "bash:3.2 $label" || continue
+      run_case "bash:3.2 $label" "$rest" docker
+    done
+  else
+    SKIP=$((SKIP + 1)); echo 'SKIP bash:3.2 (이미지 없음)'
+  fi
 fi
 
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
+if [ -n "${MUTATE:-}" ]; then
+  if [ $((PASS + FAIL)) = 0 ]; then echo "MUTATE: 아무 경우도 돌지 않았다(판정할 수 없다)" >&2; exit 2; fi
+  if [ "$FAIL" != 0 ]; then echo "MUTANT KILLED ($MUTATE)"; exit 0; fi
+  echo "MUTANT SURVIVED ($MUTATE)"; exit 1
+fi
 [ "$FAIL" = 0 ]
