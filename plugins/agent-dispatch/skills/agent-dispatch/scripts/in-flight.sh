@@ -84,6 +84,7 @@ if [ "$mode" = claim ] || [ "$mode" = release ]; then
   exit 0
 fi
 
+command -v git >/dev/null || die "git 이 필요하다"
 [ "$mode" = peers ] || git fetch -q --prune origin 2>/dev/null || true
 
 # 살아 있는 다른 세션: 이름, pid, 최근 cwd 목록(세션 파일 .scwd, 기록 .tcwd, 둘을 합친 .cwd), 최근 기록 원문, 사람 지시
@@ -92,7 +93,7 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 names=() pids=()
 for f in "$SESS"/*.json; do
   [ -e "$f" ] || continue
-  IFS=$'\t' read -r pid pstart name sid < <(jq -r '[.pid, (.procStart // "-"), (.name // "-"), (.sessionId // "-")] | @tsv' "$f") || continue
+  IFS=$'\t' read -r pid pstart name sid < <(jq -r '[.pid, .procStart, .name, .sessionId] | map(if . == null or . == "" then "-" else . end) | @tsv' "$f") || continue
   [ "$pid" = "$self_pid" ] && continue
   alive "$pid" "$pstart" || continue
   i=${#names[@]}; names+=("$name"); pids+=("$pid")
@@ -148,7 +149,7 @@ if [ "$mode" = peers ]; then
     [ -e "$cf" ] || continue
     cn=${cf##*/}; cn=${cn#"${key}"_}; cn=${cn%.json}
     [[ $cn =~ ^[0-9]+$ ]] || continue
-    jq -r --arg n "$cn" '[.pid, (.procStart // "-"), $n] | @tsv' "$cf" >> "$tmp/claims" || true
+    jq -r --arg n "$cn" '[.pid, .procStart, $n] | map(if . == null or . == "" then "-" else . end) | @tsv' "$cf" >> "$tmp/claims" || true
   done
   sort -t $'\t' -k3,3n -o "$tmp/claims" "$tmp/claims"
   found=0
@@ -171,7 +172,9 @@ fi
 verdict=FREE
 up() { case "$verdict:$1" in FREE:*|HELD:MAYBE|HELD:BUSY|MAYBE:BUSY) verdict=$1 ;; esac; }
 
-wt_lines=$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{p=substr($0,10)} /^branch /{print p "\t" substr($0,19)} /^detached/{print p "\t-"}')
+# set -e 아래에서 파이프로 바로 받으면 git 의 실패(128)로 메시지 없이 끝난다 -- 먼저 받아 이유를 낸다
+wt=$(git worktree list --porcelain 2>/dev/null) || die "git 저장소 안에서 돌려라"
+wt_lines=$(printf '%s\n' "$wt" | awk '/^worktree /{p=substr($0,10)} /^branch /{print p "\t" substr($0,19)} /^detached/{print p "\t-"}')
 
 for n in "$@"; do
   re="(^|[^0-9])$n([^0-9]|\$)"
@@ -180,7 +183,7 @@ for n in "$@"; do
   # 다른 agent-dispatch 세션의 표시
   cf="$CLAIMS/${key}_$n.json"
   if [ -f "$cf" ]; then
-    IFS=$'\t' read -r cpid cstart cname < <(jq -r '[.pid, .procStart, .name] | @tsv' "$cf")
+    IFS=$'\t' read -r cpid cstart cname < <(jq -r '[.pid, .procStart, .name] | map(if . == null or . == "" then "-" else . end) | @tsv' "$cf")
     if [ "$cpid" = "$self_pid" ]; then ev+=("claim: 이 세션");
     elif alive "$cpid" "$cstart"; then up BUSY; ev+=("claim: 세션 $cname 이 맡았다")
     else rm -f "$cf"; ev+=("claim: 죽은 세션 $cname 의 표시를 지웠다"); fi
