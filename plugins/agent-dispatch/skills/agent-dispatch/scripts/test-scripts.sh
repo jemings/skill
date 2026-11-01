@@ -372,11 +372,18 @@ fake_transcript() {
 fake_claim() {
   printf '{"pid":%s,"procStart":"-","name":"%s","sessionId":"s-%s"}\n' "$2" "$3" "$2" > "$PCFG/agent-dispatch/claims/$1"
 }
+# fake_session_raw <pid> <JSON> -- 세션 파일에 JSON 을 그대로 쓴다(procStart 가 null 인 꼴 등)
+fake_session_raw() { printf '%s\n' "$2" > "$PCFG/sessions/$1.json"; }
+# fake_claim_ps <파일 이름> <pid> <이름> <procStart> -- fake_claim 의 procStart 를 정하는 변형(빈 문자열도 쓴다)
+fake_claim_ps() {
+  printf '{"pid":%s,"procStart":"%s","name":"%s","sessionId":"s-%s"}\n' "$2" "$4" "$3" "$2" > "$PCFG/agent-dispatch/claims/$1"
+}
 # run_flight_at <디렉터리> [인자...] -- 그 디렉터리 안에서 in-flight.sh 를 가짜 설정 디렉터리 $PCFG 로 돌린다
+# GIT_CEILING_DIRECTORIES 를 $TMP 로 두어, TMPDIR 이 git 체크아웃 안이어도 $TMP 아래는 git 밖이다
 run_flight_at() {
   local dir=$1; shift
   RC=0
-  OUT=$(cd "$dir" && PATH="$STUB_BIN:$PATH" CLAUDE_CONFIG_DIR=$PCFG timeout 20 bash "$FLIGHT" "$@" 2>"$TMP/se") || RC=$?
+  OUT=$(cd "$dir" && PATH="$STUB_BIN:$PATH" CLAUDE_CONFIG_DIR=$PCFG GIT_CEILING_DIRECTORIES=$TMP timeout 20 bash "$FLIGHT" "$@" 2>"$TMP/se") || RC=$?
   ERR=$(cat "$TMP/se")
 }
 # run_peers [인자...] -- $PREPO 안에서 in-flight.sh --peers --repo o/r 를 돌린다
@@ -391,9 +398,9 @@ case_peers_session_cwd() { # 세션 파일의 cwd 가 worktree 아래면 그 세
 case_peers_transcript_cwd() { # 세션 파일 cwd 는 밖이어도 기록의 cwd 가 worktree 면 낸다(이름이 이어 붙은 형제 경로는 아니다)
   peers_setup; live_pid
   fake_session "$LIVE" peer-b sb "$TMP/elsewhere"
-  fake_transcript sb "$TMP/elsewhere" "$PWT" "$PWT-other"
+  fake_transcript sb "$TMP/elsewhere" "$PWT" "$PWT/a/b" "$PWT/a" "$PWT-other"
   run_peers
-  expect_rc 0; expect_out "peer-b"$'\t'"기록 cwd $PWT"; expect_err_empty
+  expect_rc 0; expect_out "peer-b"$'\t'"기록 cwd $PWT/a"; expect_err_empty   # 저장소 안의 마지막 것(첫 것, 최단, 최장이 아니다)
   peers_teardown
 }
 case_peers_claim() { # 이 저장소에 대한 claim 이 있으면 낸다(다른 저장소의 claim 은 보지 않는다)
@@ -427,11 +434,11 @@ case_peers_rejects_number() { # --peers 는 이슈 번호를 받지 않는다
   expect_rc 2; expect_out_empty
   [ -n "$ERR" ] || bad "stderr 에 이유가 없다"
 }
-case_peers_outside_git() { # 체크아웃 밖에서 돌리면 이유를 stderr 에 내고 exit 2
+case_peers_outside_git() { # 체크아웃 밖에서 돌리면 이유를 stderr 에 내고 exit 2(TMPDIR 이 git 안이어도 맞다)
   peers_setup; rm -rf "$TMP/nogit"; mkdir -p "$TMP/nogit"
   run_flight_at "$TMP/nogit" --peers --repo o/r
   expect_rc 2; expect_out_empty
-  [ -n "$ERR" ] || bad "stderr 에 이유가 없다"
+  case $ERR in *'git 저장소 안에서 돌려라'*) ;; *) bad "stderr 에 이유가 없다: '$ERR'" ;; esac
 }
 # 판정 모드와 --release 도 --peers 가 고친 세션 수집(.cwd 조립)과 모드 분기를 쓴다 -- 그 회귀를 지킨다
 case_flight_busy_transcript_cwd() { # 기록 cwd 가 그 이슈의 worktree 면 BUSY
@@ -454,6 +461,64 @@ case_flight_release() { # --release 는 판정으로 새지 않고 표시를 지
   run_flight_at "$PREPO" --release --repo o/r 5
   expect_rc 0; expect_out 'released #5'; expect_err_empty
   [ ! -e "$PCFG/agent-dispatch/claims/o_r_5.json" ] || bad "claim 파일이 남았다"
+}
+
+# ---- in-flight.sh: 빈 문자열, null 필드가 값을 밀지 않는다 ----
+case_flight_empty_name_busy() { # "name":"" 세션이 기록 cwd 로 worktree 에 있으면 BUSY(이름 자리는 -)
+  peers_setup; live_pid
+  fake_session "$LIVE" "" sb "$TMP/elsewhere"; fake_transcript sb "$PWT"
+  run_flight_at "$PREPO" --repo o/r 5
+  expect_rc 0; expect_out_has '#5 BUSY'; expect_out_has "세션 - 이 worktree $PWT 에서 일한다"
+  peers_teardown
+}
+case_peers_empty_name_transcript() { # "name":"" 세션은 --peers 에서 이름이 - 이고 기록 cwd 로 나온다
+  peers_setup; live_pid
+  fake_session "$LIVE" "" sb "$TMP/elsewhere"; fake_transcript sb "$PWT"
+  run_peers
+  expect_rc 0; expect_out "-"$'\t'"기록 cwd $PWT"; expect_err_empty
+  peers_teardown
+}
+case_peers_empty_name_session_cwd() { # "name":"" 세션은 sessionId 를 이름으로 달지 않는다
+  peers_setup; live_pid
+  fake_session "$LIVE" "" sid-xyz "$PWT/src"
+  run_peers
+  expect_rc 0; expect_out "-"$'\t'"세션 파일 cwd $PWT/src"; expect_err_empty
+  peers_teardown
+}
+# claim_alive_check <claim JSON> -- 살아 있는 pid 의 claim: 판정 BUSY, 파일 유지, --peers 에 claim #5
+claim_alive_check() {
+  peers_setup; live_pid
+  fake_session "$LIVE" peer-x sx "$TMP/elsewhere"
+  printf "$1\n" "$LIVE" > "$PCFG/agent-dispatch/claims/o_r_5.json"
+  run_flight_at "$PREPO" --repo o/r 5
+  expect_rc 0; expect_out_has '#5 BUSY'; expect_out_has 'claim: 세션 peer-x 이 맡았다'
+  [ -e "$PCFG/agent-dispatch/claims/o_r_5.json" ] || bad "살아 있는 세션의 claim 파일이 지워졌다"
+  run_peers
+  expect_rc 0; expect_out "peer-x"$'\t'"claim #5"; expect_err_empty
+  peers_teardown
+}
+case_flight_empty_procstart_claim() { claim_alive_check '{"pid":%s,"procStart":"","name":"peer-x"}'; }
+case_flight_null_procstart_claim() { claim_alive_check '{"pid":%s,"procStart":null,"name":"peer-x"}'; }
+case_flight_missing_procstart_claim() { claim_alive_check '{"pid":%s,"name":"peer-x"}'; }
+case_peers_empty_procstart_session() { # 세션 파일의 procStart 가 빈 문자열이어도 이름이 밀리지 않는다
+  peers_setup; live_pid
+  fake_session_raw "$LIVE" "{\"pid\":$LIVE,\"procStart\":\"\",\"name\":\"peer-p\",\"sessionId\":\"sp\",\"cwd\":\"$PWT/src\"}"
+  run_peers
+  expect_rc 0; expect_out "peer-p"$'\t'"세션 파일 cwd $PWT/src"; expect_err_empty
+  peers_teardown
+}
+case_peers_null_procstart_session() { # procStart 가 null 이어도 같다
+  peers_setup; live_pid
+  fake_session_raw "$LIVE" "{\"pid\":$LIVE,\"procStart\":null,\"name\":\"peer-p\",\"sessionId\":\"sp\",\"cwd\":\"$PWT/src\"}"
+  run_peers
+  expect_rc 0; expect_out "peer-p"$'\t'"세션 파일 cwd $PWT/src"; expect_err_empty
+  peers_teardown
+}
+case_flight_outside_git() { # 판정 모드를 체크아웃 밖에서 돌리면 이유를 stderr 에 내고 exit 2
+  peers_setup; rm -rf "$TMP/nogit"; mkdir -p "$TMP/nogit"
+  run_flight_at "$TMP/nogit" --repo o/r 5
+  expect_rc 2; expect_out_empty
+  case $ERR in *'git 저장소 안에서 돌려라'*) ;; *) bad "stderr 에 이유가 없다: '$ERR'" ;; esac
 }
 
 # ---- 정적 검사 ----
@@ -565,6 +630,15 @@ CASES=(
   'in-flight 5: 기록 cwd 가 worktree -> BUSY:case_flight_busy_transcript_cwd'
   'in-flight 5: 세션 파일 cwd 가 worktree -> BUSY:case_flight_busy_session_cwd'
   'in-flight --release 5 -> 표시를 지운다:case_flight_release'
+  'in-flight 5: name 이 빈 세션도 기록 cwd 로 BUSY:case_flight_empty_name_busy'
+  'in-flight --peers: name 이 빈 세션은 이름 -, 기록 cwd:case_peers_empty_name_transcript'
+  'in-flight --peers: name 이 빈 세션은 이름 -, 세션 파일 cwd:case_peers_empty_name_session_cwd'
+  'in-flight 5: procStart 가 빈 claim -> BUSY, claim 유지, --peers 에 claim:case_flight_empty_procstart_claim'
+  'in-flight 5: procStart 가 null 인 claim -> BUSY, claim 유지, --peers 에 claim:case_flight_null_procstart_claim'
+  'in-flight 5: procStart 키가 없는 claim -> BUSY, claim 유지, --peers 에 claim:case_flight_missing_procstart_claim'
+  'in-flight --peers: 세션 파일 procStart 가 빈 문자열:case_peers_empty_procstart_session'
+  'in-flight --peers: 세션 파일 procStart 가 null:case_peers_null_procstart_session'
+  'in-flight 5 를 git 밖에서 -> 이유와 exit 2:case_flight_outside_git'
   '정적 검사: 빈 배열 펼침 없음:case_static_empty_array'
   '정적 검사: 검사기 자체:case_static_detects'
   'wait-prs -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_wait'
