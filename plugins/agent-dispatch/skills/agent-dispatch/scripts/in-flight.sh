@@ -75,7 +75,13 @@ if [ "$mode" = claim ] || [ "$mode" = release ]; then
   for n; do
     f="$CLAIMS/${key}_$n.json"
     if [ "$mode" = claim ]; then
-      jq '{pid, procStart: (.procStart // "-"), name, sessionId}' "$SESS/$self_pid.json" > "$f"
+      # 같은 디렉터리의 임시 파일에 쓴 뒤 rename -- 읽는 쪽이 0바이트나 쓰다 만 파일을 보지 않는다.
+      # 점으로 시작해 --peers 의 "${key}_*.json" 과 판정의 "${key}_$n.json" 어느 쪽에도 걸리지 않는다.
+      [ ! -d "$f" ] || die "표시 자리가 디렉터리다: $f"
+      t=$(mktemp "$CLAIMS/.${key}_$n.XXXXXX")
+      # .pid 가 없는 세션 파일(0바이트, {})은 jq 가 exit 0 으로 빈 claim 이나 pid null 을 낸다 -- -e 와 select 로 막는다
+      jq -e 'select(.pid != null) | {pid, procStart: (.procStart // "-"), name, sessionId}' "$SESS/$self_pid.json" > "$t" || { rm -f "$t"; die "세션 파일을 읽지 못해 #$n 을 표시하지 못했다: $SESS/$self_pid.json"; }
+      mv -f "$t" "$f"
       echo "claimed #$n"
     else
       rm -f "$f"; echo "released #$n"
@@ -183,8 +189,10 @@ for n in "$@"; do
   # 다른 agent-dispatch 세션의 표시
   cf="$CLAIMS/${key}_$n.json"
   if [ -f "$cf" ]; then
-    IFS=$'\t' read -r cpid cstart cname < <(jq -r '[.pid, .procStart, .name] | map(if . == null or . == "" then "-" else . end) | @tsv' "$cf")
-    if [ "$cpid" = "$self_pid" ]; then ev+=("claim: 이 세션");
+    # 0바이트나 깨진 JSON 이면 읽을 줄이 없다 -- 표시를 읽을 수 없다고 적고 판정은 올리지 않는다(파일은 쓰는 중일 수 있어 지우지 않는다)
+    if ! IFS=$'\t' read -r cpid cstart cname < <(jq -r '[.pid, .procStart, .name] | map(if . == null or . == "" then "-" else . end) | @tsv' "$cf" 2>/dev/null); then
+      ev+=("claim: 읽을 수 없는 표시 $cf")
+    elif [ "$cpid" = "$self_pid" ]; then ev+=("claim: 이 세션");
     elif alive "$cpid" "$cstart"; then up BUSY; ev+=("claim: 세션 $cname 이 맡았다")
     else rm -f "$cf"; ev+=("claim: 죽은 세션 $cname 의 표시를 지웠다"); fi
   fi
