@@ -541,6 +541,59 @@ case_flight_outside_git() { # 판정 모드를 체크아웃 밖에서 돌리면 
   case $ERR in *'git 저장소 안에서 돌려라'*) ;; *) bad "stderr 에 이유가 없다: '$ERR'" ;; esac
 }
 
+# unreadable_claim_check <claim 파일에 쓸 내용> -- 읽을 수 없는 claim 이 판정을 막지 않는다
+# (이슈 7 은 worktree 가 없어 원래 FREE 다 -- 판정을 올리는 변이가 보인다)
+unreadable_claim_check() {
+  peers_setup
+  printf '%s' "$1" > "$PCFG/agent-dispatch/claims/o_r_7.json"
+  run_flight_at "$PREPO" --repo o/r 7 6
+  expect_rc 0
+  printf '%s\n' "$OUT" | grep -qx '#7 FREE' || bad "'#7 FREE' 줄이 없다: $OUT"
+  printf '%s\n' "$OUT" | grep -qx '#6 FREE' || bad "'#6 FREE' 줄이 없다: $OUT"
+  expect_out_has "claim: 읽을 수 없는 표시 $PCFG/agent-dispatch/claims/o_r_7.json"
+  [ -e "$PCFG/agent-dispatch/claims/o_r_7.json" ] || bad "읽을 수 없는 claim 파일이 지워졌다"
+}
+case_flight_empty_claim_file() { unreadable_claim_check ''; }
+case_flight_broken_claim_file() { unreadable_claim_check '{"pid":12'; }
+case_flight_claim_atomic() { # --claim 뒤에 임시 파일이 남지 않고 claim 은 JSON 이며, 다시 쓰면 새 파일(inode)이다
+  peers_setup
+  fake_session $$ me sme "$PREPO"
+  run_flight_at "$PREPO" --claim --repo o/r 5
+  expect_rc 0; expect_out 'claimed #5'
+  local cf="$PCFG/agent-dispatch/claims/o_r_5.json" i1 i2
+  jq -e .pid "$cf" >/dev/null || bad "claim 파일이 JSON 이 아니다"
+  i1=$(ls -i "$cf" | awk '{print $1}')
+  run_flight_at "$PREPO" --claim --repo o/r 5
+  expect_rc 0
+  i2=$(ls -i "$cf" | awk '{print $1}')
+  [ "$i1" != "$i2" ] || bad "claim 파일의 inode 가 그대로다(직접 썼다): $i1"
+  local left; left=$(ls -A "$PCFG/agent-dispatch/claims")
+  [ "$left" = o_r_5.json ] || bad "claims 에 다른 파일이 남았다: $left"
+}
+# claim_bad_self_check <세션 파일에 쓸 내용> -- 자기 세션 파일을 못 읽으면 --claim 은 실패하고 claim 도 임시 파일도 남기지 않는다
+claim_bad_self_check() {
+  peers_setup
+  printf '%s' "$1" > "$PCFG/sessions/$$.json"
+  run_flight_at "$PREPO" --claim --repo o/r 5
+  [ "$RC" -ne 0 ] || bad "exit 0 으로 끝났다: $OUT"
+  case $ERR in *'세션 파일을 읽지 못해'*) ;; *) bad "stderr 에 이유가 없다: '$ERR'" ;; esac
+  local left; left=$(ls -A "$PCFG/agent-dispatch/claims")
+  [ -z "$left" ] || bad "claims 에 파일이 남았다: $left"
+}
+case_flight_claim_broken_self() { claim_bad_self_check '{"pid":'; }
+case_flight_claim_empty_self() { claim_bad_self_check ''; }
+case_flight_claim_nopid_self() { claim_bad_self_check '{}'; }
+case_flight_claim_dir_slot() { # 표시 자리가 디렉터리면 --claim 은 실패하고 아무것도 더하지 않는다
+  peers_setup
+  fake_session $$ me sme "$PREPO"
+  mkdir "$PCFG/agent-dispatch/claims/o_r_5.json"
+  run_flight_at "$PREPO" --claim --repo o/r 5
+  [ "$RC" -ne 0 ] || bad "exit 0 으로 끝났다: $OUT"
+  case $ERR in *'표시 자리가 디렉터리다'*) ;; *) bad "stderr 에 이유가 없다: '$ERR'" ;; esac
+  [ -z "$(ls -A "$PCFG/agent-dispatch/claims/o_r_5.json")" ] || bad "디렉터리 안에 파일이 생겼다"
+  [ "$(ls -A "$PCFG/agent-dispatch/claims")" = o_r_5.json ] || bad "claims 에 다른 파일이 생겼다"
+}
+
 # ---- 정적 검사 ----
 # 길이 확인 없이 펼친 배열("${a[@]}", ${a[*]}, ${a[@]:1})이 없어야 한다. bash 4.3 이하는 set -u 아래 빈 배열 펼침에서 죽는다.
 # 안전한 꼴: ${a[@]+"${a[@]}"}, ${a[*]+${a[*]}}, ${#a[@]}, ${!a[@]}.
@@ -797,6 +850,13 @@ CASES=(
   'in-flight --peers: 세션 파일 procStart 가 빈 문자열:case_peers_empty_procstart_session'
   'in-flight --peers: 세션 파일 procStart 가 null:case_peers_null_procstart_session'
   'in-flight 5 를 git 밖에서 -> 이유와 exit 2:case_flight_outside_git'
+  'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
+  'in-flight 7 6 -> 깨진 claim 이 판정을 막지 않는다:case_flight_broken_claim_file'
+  'in-flight --claim -> 임시 파일이 남지 않고 새 파일로 바뀐다:case_flight_claim_atomic'
+  'in-flight --claim -> 깨진 자기 세션 파일이면 실패하고 아무것도 남기지 않는다:case_flight_claim_broken_self'
+  'in-flight --claim -> 0바이트 자기 세션 파일이면 실패하고 아무것도 남기지 않는다:case_flight_claim_empty_self'
+  'in-flight --claim -> pid 없는 자기 세션 파일이면 실패하고 아무것도 남기지 않는다:case_flight_claim_nopid_self'
+  'in-flight --claim -> 표시 자리가 디렉터리면 실패하고 아무것도 더하지 않는다:case_flight_claim_dir_slot'
   '정적 검사: 빈 배열 펼침 없음:case_static_empty_array'
   '정적 검사: 검사기 자체:case_static_detects'
   'wait-prs -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_wait'
