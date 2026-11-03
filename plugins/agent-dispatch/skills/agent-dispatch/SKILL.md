@@ -526,7 +526,7 @@ draft 로 열어 넘기고 리뷰어는 띄우지 않는다. 검수를 통과해
    계약서를 사실로 읽기 때문이다.
 
 **통과**:
-1. ready 로 바꾸기 직전에 피드백 커서 뒤의 PR 피드백을 읽는다(9단계 `FEEDBACK` 의 질의). draft 동안은 지켜보지
+1. ready 로 바꾸기 직전에 피드백 커서 뒤의 PR 피드백을 읽는다(9단계 `FEEDBACK` 2항의 `wait-prs.sh --show`). draft 동안은 지켜보지
    않으므로 그사이 달린 것을 여기서 잡는다. 읽은 것이 있으면 커서를 그 최댓값으로 옮긴다. 없으면 그대로 둔다.
    - 수정 요청이나 계약을 바꾸는 요청이 있으면 **걸림**으로 보고 그 항목을 Fix 에 넣는다. 계약을 바꾸는 요청은
      9단계 `FEEDBACK` 의 갈래대로 계약서부터 고친다. 사람의 요청이라 되돌림에 세지 않는다. ready 로 바꾸지 않는다.
@@ -680,23 +680,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/wait-prs.sh" --repo <o
   모두 낸다. 수정 요청인지는 네가 읽고 가른다. 같은 차례에 `CONFLICTING` 도 왔으면 위 `CONFLICTING` 의 머리말을
   따른다.
   1. 그 PR 을 목록에서 빼고 지켜보기를 다시 건다.
-  2. 창 (커서, 지금] 의 피드백을 읽는다. 리뷰 본문, 인라인의 `path:line`, 본문, URL, 대화 댓글이다. 커서가
-     `없음` 이면 `<커서>` 자리를 비운다(`""` 와 비교하면 모두 남는다).
+  2. 창 (커서, 지금] 의 피드백을 읽는다. 리뷰 본문, 인라인의 `path:line`, 본문, URL, 대화 댓글이 JSON 한 줄씩
+     나온다. 커서가 `없음` 이면 `--since` 를 뺀다(모두 나온다).
 
      ```sh
-     gh api graphql -f owner=<owner> -f name=<repo> -F number=<PR> -f query='
-     query($owner: String!, $name: String!, $number: Int!) {
-       repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-         reviews(last: 100) { nodes { state submittedAt url body author { login __typename }
-           comments(first: 100) { nodes { path line originalLine url body } } } }
-         comments(last: 100) { nodes { createdAt isMinimized url body author { login __typename } } }
-       } }
-     }' --jq '.data.repository.pullRequest as $p
-       | ($p.reviews.nodes[] | select(.submittedAt != null and .submittedAt > "<커서>" and .author.__typename != "Bot")
-          | {at: .submittedAt, state, url, body,
-             inline: [.comments.nodes[] | {where: "\(.path):\(.line // .originalLine)", url, body}]}),
-         ($p.comments.nodes[] | select(.isMinimized == false and .createdAt > "<커서>" and .author.__typename != "Bot")
-          | {at: .createdAt, url, body})'
+     bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/wait-prs.sh" --show --repo <owner>/<repo> [--since <PR>=<커서>] <PR>
      ```
 
   3. 커서를 읽은 것의 최댓값(`at`)으로 옮긴다.
