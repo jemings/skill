@@ -47,8 +47,9 @@ fi
 # api graphql 은 fixture(GraphQL 응답 JSON)에 wait-prs.sh 가 넘긴 --jq 프로그램을 실제 jq 로 적용해 낸다.
 # jq 가 없는 bash:3.2 컨테이너에서는 미리 정한 "--jq 적용 뒤 출력"(pr_<PR>.out)으로 갈음한다.
 # 호스트에서 pr_<PR>.out 이 있으면 jq 결과와 대조하고, 다르면 $STUB_DATA/mismatch 에 적는다(run_script 가 실패로 센다).
-# 질의 변수는 gh 처럼 다룬다: number/feedback 을 -f(문자열)로 넘기면 형 오류로 1 로 끝나고, -F feedback=true 가
-# 아니면 fixture 의 reviews/comments 를 지운 뒤 적용한다(@include(if: $feedback) 흉내).
+# 질의 변수는 gh 처럼 다룬다: number/feedback 을 -f(문자열)로 넘기면 형 오류로 1 로 끝나고, 질의가 $feedback 을
+# 선언했는데 -F feedback 이 없으면 1 로 끝난다. -F feedback=true 도 아니고 $feedback 없는 질의(--show)도 아니면
+# fixture 의 reviews/comments 를 지운 뒤 적용한다(@include(if: $feedback) 흉내). 출력은 gh 처럼 한 줄 JSON 이다.
 # 받은 인자(query 밖)는 argv_<PR>, 질의는 query_<PR>, --jq 프로그램은 jq_<PR> 에 남긴다.
 cat > "$STUB_BIN/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -84,9 +85,12 @@ case "$1 $2" in
     if jq -e 'has("errors")' "$f" >/dev/null 2>&1; then
       cat "$f"; echo "gh: $(jq -r '.errors[0].message' "$f")" >&2; exit 1
     fi
-    strip=.; [ "$fb" = true ] || strip='if .data.repository.pullRequest | type == "object"
+    case $fb:$q in
+      :*'$feedback'*) echo "gh: Variable \$feedback of required type Boolean! was not provided." >&2; exit 1 ;;
+    esac
+    strip=.; [ "$fb" = true ] || [ -z "$fb" ] || strip='if .data.repository.pullRequest | type == "object"
       then del(.data.repository.pullRequest.reviews, .data.repository.pullRequest.comments) else . end'
-    out=$(jq "$strip" "$f" | jq -r "$prog") || exit 1
+    out=$(jq "$strip" "$f" | jq -rc "$prog") || exit 1
     if [ -f "$d/pr_$n.out" ]; then
       echo "$n" >> "$d/checked"
       [ "$out" = "$(cat "$d/pr_$n.out")" ] || echo "PR $n: 미리 정한 출력 '$(cat "$d/pr_$n.out")' 이 jq 결과 '$out' 와 다르다" >> "$d/mismatch"
@@ -315,6 +319,72 @@ case_fb_query_args() { # 이 실행의 PR 은 -F feedback=true, 남의 PR 은 -F
     grep -qxF -- "$a" "$STUB_DATA/argv_7" 2>/dev/null || bad "PR 7 조회에 '$a' 가 없다: $(tr '\n' ' ' < "$STUB_DATA/argv_7" 2>/dev/null)"
   done
   grep -qxF -- '-F feedback=false' "$STUB_DATA/argv_5" 2>/dev/null || bad "남의 PR 5 조회가 -F feedback=false 가 아니다"
+}
+# ---- wait-prs.sh --show ----
+# show_fixture -- 커서 C 앞뒤의 리뷰, 댓글과 빼야 할 것(보류, Bot, 숨김)을 고루 둔 PR 7 응답
+show_fixture() {
+  set_pr_raw 7 '{"data":{"repository":{"pullRequest":{"state":"OPEN","mergeable":"MERGEABLE",
+    "reviews":{"nodes":[
+      {"state":"COMMENTED","submittedAt":"2026-10-30T09:00:00Z","url":"u/r1","body":"old","author":{"login":"h","__typename":"User"},"comments":{"nodes":[]}},
+      {"state":"CHANGES_REQUESTED","submittedAt":"2026-10-30T11:00:00Z","url":"u/r2","body":"fix","author":{"login":"h","__typename":"User"},
+       "comments":{"nodes":[{"path":"a.sh","line":3,"originalLine":2,"url":"u/i1","body":"here"},{"path":"b.md","line":null,"originalLine":5,"url":"u/i2","body":"gone"}]}},
+      {"state":"PENDING","submittedAt":null,"url":"u/r3","body":"draft","author":{"login":"h","__typename":"User"},"comments":{"nodes":[]}},
+      {"state":"COMMENTED","submittedAt":"2026-10-30T12:00:00Z","url":"u/r4","body":"bot","author":{"login":"b","__typename":"Bot"},"comments":{"nodes":[]}}]},
+    "comments":{"nodes":[
+      {"createdAt":"2026-10-30T09:30:00Z","isMinimized":false,"url":"u/c1","body":"early","author":{"login":"h","__typename":"User"}},
+      {"createdAt":"2026-10-30T12:30:00Z","isMinimized":false,"url":"u/c2","body":"q?","author":null},
+      {"createdAt":"2026-10-30T12:40:00Z","isMinimized":true,"url":"u/c3","body":"hidden","author":{"login":"h","__typename":"User"}},
+      {"createdAt":"2026-10-30T12:50:00Z","isMinimized":false,"url":"u/c4","body":"botc","author":{"login":"b","__typename":"Bot"}}]}}}}}'
+}
+case_show_after_cursor() { # 커서 뒤의 리뷰(인라인 자리는 line, 없으면 originalLine), 댓글만 한 줄 JSON 으로 낸다
+  show_fixture
+  run_script native "$WAIT" --show --repo o/r --since "7=$C" 7
+  expect_rc 0; expect_err_empty
+  expect_out '{"at":"2026-10-30T11:00:00Z","state":"CHANGES_REQUESTED","url":"u/r2","body":"fix","inline":[{"where":"a.sh:3","url":"u/i1","body":"here"},{"where":"b.md:5","url":"u/i2","body":"gone"}]}
+{"at":"2026-10-30T12:30:00Z","url":"u/c2","body":"q?"}'
+}
+case_show_no_cursor() { # --since 가 없으면 빼야 할 것 말고는 모두 낸다. 커서와 같은 시각은 뺀다
+  show_fixture
+  run_script native "$WAIT" --show --repo o/r 7
+  expect_rc 0
+  [ "$(printf '%s\n' "$OUT" | wc -l)" = 4 ] || bad "네 줄이어야 하는데: '$OUT'"
+  expect_out_has '"url":"u/r1"'; expect_out_has '"url":"u/c1"'
+  run_script native "$WAIT" --show --repo o/r --since 7=2026-10-30T11:00:00Z 7
+  expect_rc 0; expect_out '{"at":"2026-10-30T12:30:00Z","url":"u/c2","body":"q?"}'
+  run_script native "$WAIT" --show --repo o/r --since 7=2026-10-30T12:30:00Z 7
+  expect_rc 0; expect_out_empty
+}
+case_show_empty() { # 피드백이 없으면 아무것도 내지 않고 0
+  set_pr 7 OPEN MERGEABLE; rm -f "$STUB_DATA/pr_7.out"   # 미리 정한 출력은 지켜보기의 것이다
+  run_script native "$WAIT" --show --repo o/r 7
+  expect_rc 0; expect_out_empty; expect_err_empty
+}
+case_show_query() { # $feedback 없는 질의로, 본문, URL, 인라인 자리를 받는다. number 는 -F, hostname 은 --repo 에서
+  local f
+  set_pr 7 OPEN MERGEABLE; rm -f "$STUB_DATA/pr_7.out"   # 미리 정한 출력은 지켜보기의 것이다
+  run_script native "$WAIT" --show --repo ghe.example/o/r 7
+  expect_rc 0
+  for f in reviews submittedAt url body path line originalLine comments createdAt isMinimized __typename; do
+    grep -qw "$f" "$STUB_DATA/query_7" 2>/dev/null || bad "질의에 $f 가 없다"
+  done
+  ! grep -q feedback "$STUB_DATA/query_7" "$STUB_DATA/argv_7" 2>/dev/null || bad "--show 가 feedback 변수를 쓴다"
+  for f in '-F number=7' '-f owner=o' '-f name=r' '--hostname ghe.example'; do
+    grep -qxF -- "$f" "$STUB_DATA/argv_7" 2>/dev/null || bad "조회에 '$f' 가 없다"
+  done
+}
+case_show_gh_fail() { # 조회가 실패하면 gh 의 오류를 stderr 로 내고 1 (기다리거나 되풀이하지 않는다)
+  run_script native "$WAIT" --show --repo o/r 6
+  expect_rc 1; expect_out_empty
+  case $ERR in *'no stub for PR 6'*) ;; *) bad "stderr 에 gh 의 오류가 없다: '$ERR'" ;; esac
+}
+case_show_bad_args() { # --show 에 지켜보기 옵션, PR 0개나 2개, 위치 인자에 없는 --since 를 주면 exit 2
+  local a
+  set_pr 7 OPEN MERGEABLE; set_pr 8 OPEN MERGEABLE
+  for a in '--other 8 7' '--interval 5 7' '--timeout 5 7' '7 8' '' "--since 8=$C 7"; do
+    # shellcheck disable=SC2086
+    run_script native "$WAIT" --show --repo o/r $a
+    expect_rc 2; expect_out_empty
+  done
 }
 case_precomputed_vs_jq() { # bash:3.2 경우의 미리 정한 출력이 같은 fixture 에 실제 jq 를 적용한 결과와 같다
   local c fn
@@ -825,6 +895,12 @@ CASES=(
   'wait-prs 응답, --jq 가 깨지면 GH_FAILING:case_fb_broken native'
   'wait-prs 질의가 피드백 필드를 받는다:case_fb_query_fields'
   'wait-prs 질의 변수(feedback, number, owner, name, hostname):case_fb_query_args'
+  'wait-prs --show: 커서 뒤의 리뷰, 댓글을 한 줄 JSON 으로:case_show_after_cursor'
+  'wait-prs --show: --since 가 없으면 모두, 커서와 같은 시각은 뺀다:case_show_no_cursor'
+  'wait-prs --show: 피드백이 없으면 빈 출력, exit 0:case_show_empty'
+  'wait-prs --show: 질의와 변수:case_show_query'
+  'wait-prs --show: 조회 실패 -> stderr 와 exit 1:case_show_gh_fail'
+  'wait-prs --show: 인자가 틀리면 exit 2:case_show_bad_args'
   'bash:3.2 미리 정한 출력 = 실제 jq 결과:case_precomputed_vs_jq'
   'wait-prs -h -> 헤더 전체, exit 0:case_wait_help native'
   'wait-prs 인자 없음 -> exit 2:case_wait_no_args native'
