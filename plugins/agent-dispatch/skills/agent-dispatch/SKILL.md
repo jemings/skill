@@ -43,7 +43,24 @@ frontier 는 병합이 쌓여야 전진한다. 병합은 사람 몫이므로, �
 
 ## 0. 저장소 규칙을 읽는다
 
-다음을 읽고, 이 실행에서 쓸 값을 정한다.
+다른 무엇보다 먼저 **실행 위치를 확인한다.** 접두어 없는 `/agent-dispatch` 는 플러그인이 아니라 `npx skills add` 로 만든
+낡은 사본을 부를 수 있고, 그 사본에는 아래 담당 필터가 없을 수 있다.
+
+```sh
+bash "${CLAUDE_SKILL_DIR}/scripts/in-flight.sh" --where
+```
+
+마지막 줄 `VERDICT` 로 가른다.
+- `PLUGIN`: 그대로 진행한다.
+- `SAME`, `NONE`: 사본으로 돈다는 것을 한 줄 알리고 진행한다(`SAME` 은 내용이 플러그인과 같아 해롭지 않다).
+- `STALE`, `UNKNOWN`, 또는 명령이 실패하면(사본에 `scripts/` 가 없는 경우 포함): 사람에게 알리고 `AskUserQuestion` 으로
+  묻는다. 선택지는 셋이다: 멈춘다(권고), 플러그인 이름(`/agent-dispatch:agent-dispatch`)으로 다시 부른다, 사본으로
+  진행한다.
+- 답이 오기 전에는 **쓰기를 하지 않는다.** 이슈와 PR 의 댓글, 라벨, 본문 수정, 종결, 이슈 생성,
+  `in-flight.sh --claim/--release`, worktree, 브랜치, PR 생성, 서브에이전트 띄우기가 쓰기다. 읽기 질의와 `--where` 는 해도 된다.
+- 판정과 답은 8단계 상태 블록 첫 줄에 `위치 <VERDICT>, <답>` 으로 적는다.
+
+그다음 다음을 읽고, 이 실행에서 쓸 값을 정한다.
 - 저장소 `CLAUDE.md`/`AGENTS.md`: 작업 트리(worktree) 규칙, 시험, CI, PR, 병합, 버전, CHANGELOG, 소유권, 이슈 규칙.
 - 이슈 트래커 문서와 triage 라벨 표(mattpocock 설정이면 `docs/agents/issue-tracker.md`/`triage-labels.md`):
   `needs-triage`/`ready-for-agent`/`ready-for-human` 의 실제 라벨 문자열.
@@ -73,7 +90,7 @@ frontier 는 병합이 쌓여야 전진한다. 병합은 사람 몫이므로, �
   `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` 의 값을 쓴다. 이 스킬에서 `<base>` 는
   이 값이고, 원격 쪽은 `origin/<base>` 다. `references/` 의 지시문 틀을 채울 때 `<base>` 자리에 이 값을 넣는다.
 
-완료 기준: 라벨 문자열 셋, 이슈 저장소, base, 실행 범위(지도 번호, 또는 질의 하나), 서브에이전트에 붙일 원칙 목록이
+완료 기준: 실행 위치, 라벨 문자열 셋, 이슈 저장소, base, 실행 범위(지도 번호, 또는 질의 하나), 서브에이전트에 붙일 원칙 목록이
 정해졌다.
 
 ## 1. frontier 를 고르고 나눈다
@@ -128,7 +145,7 @@ sub-issue 가 없는 트래커의 지도 실행은 담당 필터를 각 이슈�
 스크립트를 돌린다.
 
 ```sh
-bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/in-flight.sh" --repo <owner>/<repo> <N>...
+bash "${CLAUDE_SKILL_DIR}/scripts/in-flight.sh" --repo <owner>/<repo> <N>...
 ```
 
 스크립트는 다음을 근거로 이슈마다 판정 하나와 근거 줄을 낸다.
@@ -169,7 +186,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/in-flight.sh" --repo <
 `agent-dispatch` 가 같은 이슈를 집지 않게 하려는 것이다. 표시는 이 세션이 끝나면 저절로 무효가 된다.
 
 ```sh
-bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/in-flight.sh" --claim --repo <owner>/<repo> <N>...
+bash "${CLAUDE_SKILL_DIR}/scripts/in-flight.sh" --claim --repo <owner>/<repo> <N>...
 ```
 
 완료 기준: frontier 의 모든 이슈가 다섯 갈래 가운데 하나에 들어갔다. MAYBE 는 답을 받았거나 빼 둔 채 보고 목록에
@@ -533,6 +550,7 @@ draft 로 열어 넘기고 리뷰어는 띄우지 않는다. 검수를 통과해
 지킬 수 있게 빠짐없이 적는다. 보고 끝에 두고, 그 사이에도 진행 목록이나 지켜보기가 바뀔 때마다 다시 낸다.
 
 ```
+위치 <PLUGIN|SAME|NONE|STALE|UNKNOWN>, <답|해당 없음>
 범위 <지도 #<M> | 질의 "<q>">, 담당 <me> | <사람이 정한 담당 조건>, base <이름>, 회차 <k>, 라벨 <needs-triage>/<ready-for-agent>/<ready-for-human>, 원칙 <0단계에서 정한 것 한 줄>
 지켜보기: task <id> -- 이 실행의 PR #<a> #<b>, 남의 PR #<c>      (없으면 "없음")
 처리한 병합, 닫힘: #<p> #<q>
@@ -573,7 +591,7 @@ PR 의 병합은 사람이 저장소의 리뷰, 병합 절차로 한다. 너는 
 **지켜보기를 건다**: Bash 의 `run_in_background` 로 띄우고, 그 task id 를 상태 블록에 적는다.
 
 ```sh
-bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/wait-prs.sh" --repo <owner>/<repo> \
+bash "${CLAUDE_SKILL_DIR}/scripts/wait-prs.sh" --repo <owner>/<repo> \
   [--since <PR>=<커서>]... [--other <남의 PR>]... <이 실행의 PR>...
 ```
 
@@ -621,7 +639,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/wait-prs.sh" --repo <o
      나온다. 커서가 `없음` 이면 `--since` 를 뺀다(모두 나온다).
 
      ```sh
-     bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/wait-prs.sh" --show --repo <owner>/<repo> [--since <PR>=<커서>] <PR>
+     bash "${CLAUDE_SKILL_DIR}/scripts/wait-prs.sh" --show --repo <owner>/<repo> [--since <PR>=<커서>] <PR>
      ```
 
   3. 커서를 읽은 것의 최댓값(`at`)으로 옮긴다.
