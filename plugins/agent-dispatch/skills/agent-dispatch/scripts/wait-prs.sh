@@ -2,11 +2,15 @@
 # wait-prs.sh -- 지켜보는 PR 가운데 하나에 일이 생길 때까지 기다린다(agent-dispatch 9단계).
 #
 #   wait-prs.sh [--repo [HOST/]OWNER/REPO] [--interval 초] [--timeout 초] [--since <PR>=<시각>]... [--other <PR>]... [<PR>...]
+#   wait-prs.sh --show [--repo [HOST/]OWNER/REPO] [--since <PR>=<시각>] <PR>
 #
 #   <PR>          이 실행이 연 PR -- MERGED/CLOSED/CONFLICTING/FEEDBACK 을 본다
 #   --other <PR>  지도 안의 이슈를 막고 있는 다른 세션의 PR -- MERGED/CLOSED 만 본다
 #   --since <PR>=<시각>  그 PR 의 피드백 커서(UTC, 2026-10-30T09:15:00Z 꼴) -- 이보다 늦은 피드백만 센다.
 #                 <PR> 은 위치 인자에 있어야 한다. 주지 않은 PR 은 모든 피드백을 센다
+#   --show        기다리지 않고, PR 하나의 커서 뒤 피드백(아래 "PR 피드백"과 같은 것)을 한 번 조회해 JSON 한 줄씩 내고 끝난다.
+#                 리뷰는 {at,state,url,body,inline:[{where:"path:line",url,body}]}, 대화 댓글은 {at,url,body} 다.
+#                 없으면 아무것도 내지 않는다. 조회가 실패하면 gh 의 오류를 stderr 로 내고 1 로 끝난다
 #
 # 일(생긴 것만 한 줄씩 낸다):
 #   MERGED <PR>               병합됐다
@@ -26,16 +30,17 @@ die() { echo "wait-prs: $*" >&2; exit 2; }
 usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }
 value() { [ -n "${2:-}" ] || die "$1 에 값을 줘라"; }
 
-repo='' interval=${WAIT_PRS_INTERVAL:-60} limit=0 max_fail=${WAIT_PRS_MAX_FAIL:-10}
+repo='' interval=${WAIT_PRS_INTERVAL:-60} limit=0 max_fail=${WAIT_PRS_MAX_FAIL:-10} show=0 waitopt=0
 others=()
 since=()   # PR 번호 -> 피드백 커서. fails 처럼 PR 번호를 키로 하는 indexed 배열이다(bash 3.2 에는 declare -A 가 없다).
 stamp='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
 while [ $# -gt 0 ]; do
   case $1 in
     --repo) value "$@"; repo=$2; shift 2 ;;
-    --interval) value "$@"; interval=$2; shift 2 ;;
-    --timeout) value "$@"; limit=$2; shift 2 ;;
-    --other) value "$@"; others+=("$2"); shift 2 ;;
+    --interval) value "$@"; interval=$2; waitopt=1; shift 2 ;;
+    --timeout) value "$@"; limit=$2; waitopt=1; shift 2 ;;
+    --other) value "$@"; others+=("$2"); waitopt=1; shift 2 ;;
+    --show) show=1; shift ;;
     --since)
       value "$@"
       [[ $2 =~ ^([0-9]+)=($stamp)$ ]] || die "--since 는 <PR>=<YYYY-MM-DDTHH:MM:SSZ> 다: $2"
@@ -49,6 +54,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 mine=("$@")
+if [ "$show" = 1 ]; then
+  [ "$waitopt" = 0 ] || die "--show 에는 --other, --interval, --timeout 을 줄 수 없다"
+  [ ${#mine[@]} = 1 ] || die "--show 에는 PR 하나를 줘라"
+fi
 [ $((${#mine[@]} + ${#others[@]})) -gt 0 ] || { usage >&2; exit 2; }
 for n in ${mine[@]+"${mine[@]}"} ${others[@]+"${others[@]}"}; do [[ $n =~ ^[0-9]+$ ]] || die "PR 번호가 아니다: $n"; done
 for k in "${!since[@]}"; do
@@ -91,6 +100,10 @@ gql='query($owner: String!, $name: String!, $number: Int!, $feedback: Boolean!) 
   } }
 }'
 
+# 피드백으로 세는 리뷰, 대화 댓글. 지켜보기(jq_program)와 --show(show_program)가 함께 쓴다.
+fb_review='select(.submittedAt != null and .author.__typename != "Bot")'
+fb_comment='select(.isMinimized == false and .author.__typename != "Bot")'
+
 # jq_program <mine|other> <커서|빈 값> -- gh --jq 에 넘길 프로그램. "<state> <mergeable>[ <가장 늦은 피드백 시각>]" 한 줄을 낸다.
 # gh --jq 에는 --arg 가 없어 커서를 프로그램에 박는다(꼴은 인자 검사에서 확인했다). ISO-8601 UTC 는 사전순이 시각순이다.
 # 커서가 비면 모든 시각이 "" 보다 크다. author 가 null(지운 계정)이면 .author.__typename 도 null 이라 센다.
@@ -98,10 +111,37 @@ gql='query($owner: String!, $name: String!, $number: Int!, $feedback: Boolean!) 
 jq_program() {
   local p='.data.repository.pullRequest | "\(.state) \(.mergeable)"'
   [ "$1" = mine ] || { printf '%s' "$p"; return; }
-  printf '%s' "$p"' + ([(.reviews.nodes[] | select(.submittedAt != null and .author.__typename != "Bot") | .submittedAt),
-    (.comments.nodes[] | select(.isMinimized == false and .author.__typename != "Bot") | .createdAt)]
+  printf '%s' "$p"' + ([(.reviews.nodes[] | '"$fb_review"' | .submittedAt),
+    (.comments.nodes[] | '"$fb_comment"' | .createdAt)]
     | map(select(. > "'"$2"'")) | max | if . == null then "" else " \(.)" end)'
 }
+
+# --show: 피드백의 본문, URL, 인라인 자리까지 받는다. 커서 비교는 jq_program 과 같다(엄격한 >, 비면 모두).
+# shellcheck disable=SC2016
+show_gql='query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    reviews(last: 100) { nodes { state submittedAt url body author { login __typename }
+      comments(first: 100) { nodes { path line originalLine url body } } } }
+    comments(last: 100) { nodes { createdAt isMinimized url body author { login __typename } } }
+  } }
+}'
+show_program() {
+  printf '%s' '.data.repository.pullRequest as $p
+  | ($p.reviews.nodes[] | '"$fb_review"' | select(.submittedAt > "'"$1"'")
+     | {at: .submittedAt, state, url, body,
+        inline: [.comments.nodes[] | {where: "\(.path):\(.line // .originalLine)", url, body}]}),
+    ($p.comments.nodes[] | '"$fb_comment"' | select(.createdAt > "'"$1"'") | {at: .createdAt, url, body})'
+}
+if [ "$show" = 1 ]; then
+  n=${mine[0]}
+  query api graphql ${host[@]+"${host[@]}"} -f query="$show_gql" -f owner="$owner" -f name="$name" -F number="$n" \
+    --jq "$(show_program "${since[10#$n]:-}")" 2>"$err"
+  rc=$?
+  [ "$rc" = 0 ] && exit 0
+  cat "$err" >&2
+  [ "$rc" = 124 ] && echo "wait-prs: 60초 안에 답이 없다" >&2
+  exit 1
+fi
 
 # poll <PR> <mine|other> -- 그 PR 의 일을 events 에 더한다.
 poll() {
