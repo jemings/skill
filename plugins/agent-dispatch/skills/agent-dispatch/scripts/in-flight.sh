@@ -6,6 +6,7 @@
 #   in-flight.sh --claim [--repo owner/repo] <N>...  이 세션이 맡았다고 표시한다(같은 PC 의 다른 agent-dispatch 가 본다)
 #   in-flight.sh --release [--repo owner/repo] <N>... 표시를 거둔다
 #   in-flight.sh --peers [--repo owner/repo]         같은 저장소에서 일하는 살아 있는 다른 세션
+#   in-flight.sh --where                             이 스크립트가 플러그인에서 도는지, 낡은 사본에서 도는지(0단계)
 #
 # 판정(이슈마다 한 줄, 근거는 그 아래 들여 쓴 줄):
 #   BUSY   살아 있는 다른 세션의 작업 디렉터리(cwd)가 그 이슈의 worktree 이거나, 그 세션이 맡았다고 표시했거나, 열린 PR 이 있다
@@ -17,6 +18,13 @@
 #   세션 파일 cwd <경로>   세션 파일의 cwd 가 git worktree list 의 경로와 같거나 그 아래다
 #   기록 cwd <경로>        세션 기록의 cwd 가 그렇다(그 가운데 마지막 것)
 #   claim #N              그 세션이 이 저장소의 #N 을 맡았다고 표시했다
+#
+# --where(읽기 전용. 인자를 받지 않고 git, gh, repo 없이 돈다. 언제나 exit 0, 인자를 주면 exit 2). 줄 단위로 낸다:
+#   WHERE plugin|copy <경로>               이 스킬 디렉터리(심볼릭 링크를 푼 실제 경로)가 설치된 플러그인 안인가
+#   INSTALLED <키> <version> <installPath>  $CFG/plugins/installed_plugins.json 의 agent-dispatch@* 항목마다
+#   VERDICT <값>                           PLUGIN 플러그인 / SAME 사본이고 SKILL.md 가 설치본과 같다 /
+#                                          STALE 사본이고 설치본과 SKILL.md 가 다르다 / NONE 사본이고 설치본이 없다 /
+#                                          UNKNOWN JSON 이 깨졌거나 jq 가 없다
 #
 # 근거: ~/.claude/sessions/<pid>.json(살아 있는 세션 -- pid 와 procStart 로 확인), 그 세션 기록
 # ~/.claude/projects/*/<sessionId>.jsonl 의 cwd, 사람 지시, git worktree, 브랜치, gh 의 열린 PR.
@@ -41,12 +49,42 @@ while [ $# -gt 0 ]; do
     --claim) mode=claim; shift ;;
     --release) mode=release; shift ;;
     --peers) mode=peers; shift ;;
+    --where) mode=where; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "모르는 옵션: $1" ;;
     *) break ;;
   esac
 done
+
+# --where: 이슈, repo, gh, jq 에 기대지 않는 점검이라 다른 검사보다 앞에서 끝낸다
+if [ "$mode" = where ]; then
+  [ $# = 0 ] && [ -z "$repo" ] || die "--where 는 인자를 받지 않는다: $*"
+  D=$(cd "$(dirname "$0")/.." && pwd -P)
+  entries= verdict=
+  if [ ! -f "$CFG/plugins/installed_plugins.json" ]; then verdict=NONE
+  elif ! command -v jq >/dev/null 2>&1; then verdict=UNKNOWN
+  elif entries=$(jq -r '(.plugins // {}) | to_entries[] | select(.key | startswith("agent-dispatch@"))
+                        | .key as $k | .value[] | "\($k)\t\(.version // "-")\t\(.installPath // "")"' \
+                      "$CFG/plugins/installed_plugins.json" 2>/dev/null); then
+    [ -n "$entries" ] || verdict=NONE
+  else entries= verdict=UNKNOWN
+  fi
+  where=copy
+  if [ -z "$verdict" ]; then
+    verdict=STALE
+    while IFS=$'\t' read -r k v ip; do
+      P=$(cd "$ip/skills/agent-dispatch" 2>/dev/null && pwd -P) || continue
+      if [ "$P" = "$D" ]; then where=plugin verdict=PLUGIN; break; fi
+      [ "$verdict" = SAME ] || ! cmp -s "$D/SKILL.md" "$P/SKILL.md" 2>/dev/null || verdict=SAME
+    done <<<"$entries"
+  fi
+  echo "WHERE $where $D"
+  [ -z "$entries" ] || while IFS=$'\t' read -r k v ip; do echo "INSTALLED $k $v $ip"; done <<<"$entries"
+  echo "VERDICT $verdict"
+  exit 0
+fi
+
 if [ "$mode" = peers ]; then [ $# = 0 ] || die "--peers 는 이슈 번호를 받지 않는다: $*"
 else [ $# -gt 0 ] || { usage >&2; exit 2; }; fi
 for n; do [[ $n =~ ^[0-9]+$ ]] || die "이슈 번호가 아니다: $n"; done
