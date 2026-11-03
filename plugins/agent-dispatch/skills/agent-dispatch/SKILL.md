@@ -56,8 +56,19 @@ frontier 는 병합이 쌓여야 전진한다. 병합은 사람 몫이므로, �
   ```sh
   gh api -X GET search/issues -f q='repo:<owner>/<repo> is:issue is:open <조건>' -F per_page=100 --paginate \
     --jq '.items[] | select(.issue_dependencies_summary.blocked_by==0)
+          | select(((.assignees|length)==0 and .user.login=="<me>") or any(.assignees[]; .login=="<me>"))
           | "#\(.number) \([.labels[].name]|join(",")) \(.title)"'
   ```
+- **담당 필터**: 실행 범위는 지도, 조건과 상관없이 **이 사용자의 이슈**로 좁힌다. assignee 가 없고 이 사용자가
+  등록한 이슈, 또는 이 사용자가 assignee 인 이슈다. 남이 등록하고 아무도 맡지 않은 이슈와 남에게 맡겨진 이슈는
+  범위 밖이다. 남이 맡은 이슈를 집어 그 사람의 일과 겹치지 않게 하려는 것이다.
+  - `<me>` 는 `gh api user --jq .login` 의 값이다. 0단계에서 한 번 정하고 상태 블록에 적는다.
+  - 필터는 검색 질의(`q`)가 아니라 `--jq` 의 `select` 로 건다. 검색 문법의 OR 와 괄호는 API 의 검색 모드에
+    따라 달리 해석되고, 지도 실행의 sub-issue 질의에는 검색 문법이 없기 때문이다. 이 스킬의 범위 질의(0, 1,
+    8단계)는 모두 이 `select` 를 함께 쓴다.
+  - 사람이 조건에 담당을 직접 정하면(`assignee:`, `author:`, "누가 맡은 것까지" 등) 그 조건이 이 필터를 갈음한다.
+    그때는 `select` 를 빼거나 그 조건대로 고친다.
+  - 이 실행이 `gh issue create` 로 낸 이슈는 이 사용자가 등록했고 assignee 가 없으므로 필터를 통과한다.
 - **base**: 이 실행의 PR 이 병합되는 브랜치. 저장소 규칙 문서가 정하면 그것을, 아니면
   `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` 의 값을 쓴다. 이 스킬에서 `<base>` 는
   이 값이고, 원격 쪽은 `origin/<base>` 다. `references/` 의 지시문 틀을 채울 때 `<base>` 자리에 이 값을 넣는다.
@@ -77,10 +88,14 @@ frontier 는 병합이 쌓여야 전진한다. 병합은 사람 몫이므로, �
 ```sh
 gh api "repos/<owner>/<repo>/issues/<map>/sub_issues?per_page=100" \
   --jq '.[] | select(.state=="open" and .issue_dependencies_summary.blocked_by==0)
+        | select(((.assignees|length)==0 and .user.login=="<me>") or any(.assignees[]; .login=="<me>"))
         | "#\(.number) \([.labels[].name]|join(",")) \(.title)"'
 ```
 
-sub-issue 가 없는 트래커의 지도 실행은 지도 본문의 목록과 각 이슈 맨 앞의 `Blocked by:` 줄이나 `선행:` 으로 시작하는 줄(앞에 금지 표시 이모지가 붙기도 한다)로 같은 것을 고른다.
+지도 실행에서 담당 필터(0단계)에 걸려 빠진 열린 sub-issue 는 frontier 에 넣지 않는다. 마지막 보고에
+`담당 밖(등록 <login>, assignee <login|없음>)` 으로 한 줄씩 적어, 사람이 지도에 남은 일을 알게 한다.
+
+sub-issue 가 없는 트래커의 지도 실행은 담당 필터를 각 이슈의 작성자, assignee 에 대어 걸고, 지도 본문의 목록과 각 이슈 맨 앞의 `Blocked by:` 줄이나 `선행:` 으로 시작하는 줄(앞에 금지 표시 이모지가 붙기도 한다)로 같은 것을 고른다.
 지도 본문이 "지금 착수할 수 있는 것"으로 따로 꼽은 이슈도 넣는다.
 
 **진행 목록**은 이 실행이 지금 손대고 있는 이슈의 목록이다. 회차가 겹치면 이 목록 없이는 같은 이슈를 다시
@@ -580,7 +595,7 @@ draft 로 열어 넘기고 리뷰어는 띄우지 않는다. 검수를 통과해
 지킬 수 있게 빠짐없이 적는다. 보고 끝에 두고, 그 사이에도 진행 목록이나 지켜보기가 바뀔 때마다 다시 낸다.
 
 ```
-범위 <지도 #<M> | 질의 "<q>">, base <이름>, 회차 <k>, 라벨 <needs-triage>/<ready-for-agent>/<ready-for-human>, 원칙 <0단계에서 정한 것 한 줄>
+범위 <지도 #<M> | 질의 "<q>">, 담당 <me> | <사람이 정한 담당 조건>, base <이름>, 회차 <k>, 라벨 <needs-triage>/<ready-for-agent>/<ready-for-human>, 원칙 <0단계에서 정한 것 한 줄>
 지켜보기: task <id> -- 이 실행의 PR #<a> #<b>, 남의 PR #<c>      (없으면 "없음")
 처리한 병합, 닫힘: #<p> #<q>
 범위 밖으로 낸 이슈: #<a> <이유>      (없으면 "없음")
@@ -715,6 +730,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/agent-dispatch/scripts/wait-prs.sh" --repo <o
 사람이 멈추라고 하면 그 자리에서 지켜보기를 멈추고 보고한다. 마지막 보고에는 범위 전체의 상태를 싣는다.
 - 닫힌 이슈와 그 PR.
 - 남은 이슈와 남은 이유. 사람이 풀어야 다시 돌 수 있는 것을 먼저 적는다.
+- 지도 실행이면 담당 필터에 걸려 빠진 열린 sub-issue(1단계).
 - 정리한 worktree. 주인 없이 남은 worktree, 브랜치.
 
 완료 기준: 다음 가운데 하나다.
