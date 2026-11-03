@@ -664,6 +664,116 @@ case_flight_claim_dir_slot() { # 표시 자리가 디렉터리면 --claim 은 �
   [ "$(ls -A "$PCFG/agent-dispatch/claims")" = o_r_5.json ] || bad "claims 에 다른 파일이 생겼다"
 }
 
+# ---- in-flight --where: 실행 위치(플러그인인가, 낡은 사본인가) ----
+# where_setup -- $WH 아래에 가짜 설정 디렉터리, 설치된 플러그인(inst), 사본(copy)을 둔다. 스크립트는 $FLIGHT(변이 사본일 수 있다)를 복사해 쓴다.
+# 플러그인 SKILL.md 는 "plug", 사본은 "old" 로 다르게 둔다. installed_plugins.json 은 inst 를 가리킨다.
+where_setup() {
+  WH=$TMP/wh; rm -rf "$WH"; mkdir -p "$WH/cfg/plugins" "$TMP/nogit"
+  WINST=$WH/inst/agent-dispatch/1.11.0
+  mkdir -p "$WINST/skills/agent-dispatch/scripts" "$WH/copy/skills/agent-dispatch/scripts"
+  cp "$FLIGHT" "$WINST/skills/agent-dispatch/scripts/in-flight.sh"
+  cp "$FLIGHT" "$WH/copy/skills/agent-dispatch/scripts/in-flight.sh"
+  echo plug > "$WINST/skills/agent-dispatch/SKILL.md"
+  echo old > "$WH/copy/skills/agent-dispatch/SKILL.md"
+  printf '{"plugins":{"agent-dispatch@skill":[{"scope":"user","installPath":"%s","version":"1.11.0"}],"other@skill":[{"installPath":"/x","version":"9"}]}}\n' "$WINST" > "$WH/cfg/plugins/installed_plugins.json"
+}
+# run_where <스크립트 디렉터리(scripts)> [인자...] -- git 밖에서 그 스크립트를 $WH/cfg 설정으로 돌린다. PATH 앞에 STUB_BIN(gh 스텁)이 있다
+run_where() {
+  local sd=$1; shift
+  RC=0
+  OUT=$(cd "$TMP/nogit" && PATH="$STUB_BIN:$PATH" CLAUDE_CONFIG_DIR=$WH/cfg GIT_CEILING_DIRECTORIES=$TMP timeout 20 bash "$sd/in-flight.sh" "$@" 2>"$TMP/se") || RC=$?
+  ERR=$(cat "$TMP/se")
+}
+WCOPY() { echo "$WH/copy/skills/agent-dispatch/scripts"; }
+WPLUG() { echo "$WINST/skills/agent-dispatch/scripts"; }
+case_where_plugin() { # installPath 안에서 돌면 PLUGIN
+  where_setup
+  run_where "$(WPLUG)" --where
+  expect_rc 0; expect_err_empty
+  expect_out "WHERE plugin $WINST/skills/agent-dispatch"$'\n'"INSTALLED agent-dispatch@skill 1.11.0 $WINST"$'\n'"VERDICT PLUGIN"
+}
+case_where_stale() { # 다른 디렉터리이고 SKILL.md 가 다르면 copy, STALE
+  where_setup
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_err_empty
+  expect_out "WHERE copy $WH/copy/skills/agent-dispatch"$'\n'"INSTALLED agent-dispatch@skill 1.11.0 $WINST"$'\n'"VERDICT STALE"
+}
+case_where_same() { # 내용이 같은 사본은 SAME
+  where_setup; cp "$WINST/skills/agent-dispatch/SKILL.md" "$WH/copy/skills/agent-dispatch/SKILL.md"
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_out_has "WHERE copy "; expect_out_has "VERDICT SAME"
+}
+case_where_none_no_file() { # installed_plugins.json 이 없으면 NONE
+  where_setup; rm "$WH/cfg/plugins/installed_plugins.json"
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_out "WHERE copy $WH/copy/skills/agent-dispatch"$'\n'"VERDICT NONE"
+}
+case_where_none_no_entry() { # agent-dispatch 항목이 없으면 NONE (다른 플러그인만 있다)
+  where_setup; echo '{"plugins":{"other@skill":[{"installPath":"/x","version":"9"}]}}' > "$WH/cfg/plugins/installed_plugins.json"
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_out "WHERE copy $WH/copy/skills/agent-dispatch"$'\n'"VERDICT NONE"
+}
+case_where_broken_json() { # 깨진 JSON 이면 UNKNOWN, exit 0
+  where_setup; echo '{"plugins": [' > "$WH/cfg/plugins/installed_plugins.json"
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_out "WHERE copy $WH/copy/skills/agent-dispatch"$'\n'"VERDICT UNKNOWN"
+}
+case_where_no_jq() { # jq 가 없어도 죽지 않고 UNKNOWN (PATH 에는 dirname, cmp 만 둔다)
+  where_setup; rm -rf "$WH/nojq"; mkdir "$WH/nojq"
+  ln -s "$(command -v dirname)" "$WH/nojq/dirname"; ln -s "$(command -v cmp)" "$WH/nojq/cmp"
+  RC=0
+  OUT=$(cd "$TMP/nogit" && PATH="$WH/nojq" CLAUDE_CONFIG_DIR=$WH/cfg "$BASH" "$(WCOPY)/in-flight.sh" --where 2>"$TMP/se") || RC=$?
+  ERR=$(cat "$TMP/se")
+  expect_rc 0; expect_out "WHERE copy $WH/copy/skills/agent-dispatch"$'\n'"VERDICT UNKNOWN"
+}
+case_where_symlink_to_plugin() { # skills/agent-dispatch 가 installPath 를 가리키는 링크면 실제 경로로 풀어 PLUGIN
+  where_setup; rm -rf "$WH/copy/skills/agent-dispatch"
+  ln -s "$WINST/skills/agent-dispatch" "$WH/copy/skills/agent-dispatch"
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_out_has "WHERE plugin $WINST/skills/agent-dispatch"; expect_out_has "VERDICT PLUGIN"
+}
+case_where_symlink_to_copy() { # 링크 대상이 다른 곳(낡은 사본)이면 그 실제 경로로 STALE
+  where_setup; mkdir -p "$WH/real"; mv "$WH/copy/skills/agent-dispatch" "$WH/real/agent-dispatch"
+  ln -s "$WH/real/agent-dispatch" "$WH/copy/skills/agent-dispatch"
+  run_where "$(WCOPY)" --where
+  expect_rc 0; expect_out_has "WHERE copy $WH/real/agent-dispatch"$'\n'; expect_out_has "VERDICT STALE"
+}
+case_where_installpath_via_symlink() { # installPath 가 링크를 거치고 끝에 슬래시가 있어도 실제 경로로 풀어 PLUGIN
+  where_setup
+  ln -s "$WH/inst" "$WH/instlink"
+  printf '{"plugins":{"agent-dispatch@skill":[{"scope":"user","installPath":"%s/agent-dispatch/1.11.0/","version":"1.11.0"}]}}\n' "$WH/instlink" > "$WH/cfg/plugins/installed_plugins.json"
+  run_where "$(WPLUG)" --where
+  expect_rc 0; expect_out_has "WHERE plugin $WINST/skills/agent-dispatch"; expect_out_has "VERDICT PLUGIN"
+}
+case_where_outside_git_no_gh() { # git 밖, gh 없이 돈다(PATH 에 dirname, cmp, jq 만 둔다)
+  where_setup; rm -rf "$WH/min"; mkdir "$WH/min"
+  local t; for t in dirname cmp jq; do ln -s "$(command -v $t)" "$WH/min/$t"; done
+  RC=0
+  OUT=$(cd "$TMP/nogit" && PATH="$WH/min" CLAUDE_CONFIG_DIR=$WH/cfg GIT_CEILING_DIRECTORIES=$TMP "$BASH" "$(WCOPY)/in-flight.sh" --where 2>"$TMP/se") || RC=$?
+  ERR=$(cat "$TMP/se")
+  expect_rc 0; expect_err_empty; expect_out_has "VERDICT STALE"
+}
+case_where_rejects_args() { # 인자를 주면 exit 2
+  where_setup
+  run_where "$(WCOPY)" --where 5
+  expect_rc 2; expect_out_empty
+  [ -n "$ERR" ] || bad "stderr 에 이유가 없다"
+  run_where "$(WCOPY)" --where --repo o/r
+  expect_rc 2; expect_out_empty
+}
+case_where_skill_static() { # SKILL.md: CLAUDE_PLUGIN_ROOT 0건, 호출은 CLAUDE_SKILL_DIR, 0단계에 --where 와 쓰기 금지
+  local sk=$SCRIPTS/../SKILL.md bad_calls step0
+  [ -f "$sk" ] || { bad "SKILL.md 가 없다: $sk"; return; }
+  ! grep -q 'CLAUDE_PLUGIN_ROOT' "$sk" || bad "SKILL.md 에 CLAUDE_PLUGIN_ROOT 가 남았다"
+  bad_calls=$(grep -nE '(in-flight|wait-prs)\.sh' "$sk" | grep -E 'bash "' | grep -v 'bash "\${CLAUDE_SKILL_DIR}/scripts/' || true)
+  [ -z "$bad_calls" ] || bad "스크립트 호출이 \${CLAUDE_SKILL_DIR}/scripts/ 로 시작하지 않는다: $bad_calls"
+  [ "$(grep -c 'bash "${CLAUDE_SKILL_DIR}/scripts/' "$sk")" -ge 4 ] || bad "CLAUDE_SKILL_DIR 호출이 4곳 미만이다"
+  step0=$(awk '/^## 0\./{f=1;next} /^## 1\./{f=0} f' "$sk")
+  case $step0 in *'in-flight.sh" --where'*) ;; *) bad "0단계에 --where 호출이 없다" ;; esac
+  case $step0 in *'쓰기를 하지 않는다'*) ;; *) bad "0단계에 쓰기 금지 문장이 없다" ;; esac
+  case $step0 in *'AskUserQuestion'*) ;; *) bad "0단계에 AskUserQuestion 이 없다" ;; esac
+}
+
 # ---- 정적 검사 ----
 # 길이 확인 없이 펼친 배열("${a[@]}", ${a[*]}, ${a[@]:1})이 없어야 한다. bash 4.3 이하는 set -u 아래 빈 배열 펼침에서 죽는다.
 # 안전한 꼴: ${a[@]+"${a[@]}"}, ${a[*]+${a[*]}}, ${#a[@]}, ${!a[@]}.
@@ -926,6 +1036,19 @@ CASES=(
   'in-flight --peers: 세션 파일 procStart 가 빈 문자열:case_peers_empty_procstart_session'
   'in-flight --peers: 세션 파일 procStart 가 null:case_peers_null_procstart_session'
   'in-flight 5 를 git 밖에서 -> 이유와 exit 2:case_flight_outside_git'
+  'in-flight --where: installPath 안이면 PLUGIN:case_where_plugin'
+  'in-flight --where: 다른 SKILL.md 의 사본은 STALE:case_where_stale'
+  'in-flight --where: 같은 SKILL.md 의 사본은 SAME:case_where_same'
+  'in-flight --where: 파일이 없으면 NONE:case_where_none_no_file'
+  'in-flight --where: 항목이 없으면 NONE:case_where_none_no_entry'
+  'in-flight --where: 깨진 JSON 은 UNKNOWN, exit 0:case_where_broken_json'
+  'in-flight --where: jq 가 없으면 UNKNOWN:case_where_no_jq'
+  'in-flight --where: 링크가 installPath 를 가리키면 PLUGIN:case_where_symlink_to_plugin'
+  'in-flight --where: 링크가 다른 곳을 가리키면 실제 경로로 STALE:case_where_symlink_to_copy'
+  'in-flight --where: installPath 가 링크를 거쳐도 PLUGIN:case_where_installpath_via_symlink'
+  'in-flight --where: git 밖, gh 없이 돈다:case_where_outside_git_no_gh'
+  'in-flight --where: 인자를 주면 exit 2:case_where_rejects_args'
+  'in-flight --where: SKILL.md 정적 검사:case_where_skill_static'
   'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
   'in-flight 7 6 -> 깨진 claim 이 판정을 막지 않는다:case_flight_broken_claim_file'
   'in-flight --claim -> 임시 파일이 남지 않고 새 파일로 바뀐다:case_flight_claim_atomic'
