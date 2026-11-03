@@ -67,6 +67,11 @@ Install only the plugins you want — each is independent. Then reload plugins
 `/agent-delegation:agent-delegation`, `/agent-dispatch:agent-dispatch` — or
 auto-trigger from natural-language requests (see each skill's description).
 
+A copy made with `npx skills add` is never updated, and the unprefixed
+`/<name>` can invoke that stale copy instead of the plugin (`/<name>:<name>`).
+If you use a plugin, delete the copy (`~/.claude/skills/<name>` and whatever it
+links to).
+
 ## statusline-kit — statusline setup
 
 Installs the statusline (model · cwd/branch · context usage · session token
@@ -115,7 +120,7 @@ cleaned up on the next marketplace sync instead of failing to load.
 
 ```bash
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
-bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh (gh stub that runs host jq, bash:3.2 if docker image exists)
+bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh incl. --where (gh stub that runs host jq, bash:3.2 if docker image exists)
 bash scripts/check-ascii.sh plugins/agent-dispatch                              # agent-dispatch must stay ASCII punctuation (exit 1 lists offenders)
 ```
 
