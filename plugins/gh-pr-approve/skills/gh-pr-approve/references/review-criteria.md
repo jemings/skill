@@ -143,7 +143,7 @@ CI fail 의 원인이 PR 의 diff 가 아니라 main 의 후속 commit 과의 st
 
 job → 검사 path 의 정적 매핑 표를 두는 대안 (예: `e2e (playwright smoke)` → `frontend/e2e/**`) 은 reviewer 의 매 PR 추론 부담을 줄이지만, job 추가/변경 시 매핑 갱신 부담이 생긴다. 본 휴리스틱은 매핑 없이도 동작하므로 기본 절차로 채택한다.
 
-GitHub branch protection 을 사용하지 않는 환경에서는 "required check" 의 정의 자체가 advisory 다. 그래도 `_명백히 PR diff 가 원인인_` CI fail 은 여전히 BLOCKER — 위 강등은 _stale rebase_ 케이스에만 적용한다. CI 실패 차원의 정의·가시화 채널(`🚫 Blocked` · `🔴 CI fail` 라벨 등)은 이 스킬 묶음의 정책 문서 `${CLAUDE_PLUGIN_ROOT}/docs/github-integration.md` 를 따른다 (라벨 미설정 repo 는 silent skip).
+GitHub branch protection 을 사용하지 않는 환경에서는 "required check" 의 정의 자체가 advisory 다. 그래도 `_명백히 PR diff 가 원인인_` CI fail 은 여전히 BLOCKER — 위 강등은 _stale rebase_ 케이스에만 적용한다. CI 실패 차원의 정의·가시화 채널(`🚫 Blocked` · `🔴 CI fail` 라벨 등)은 대상 저장소의 `.claude/github-integration.md`(있으면)를 따른다 (없거나 라벨 미설정 repo 는 silent skip).
 
 ## Self-review guard
 
