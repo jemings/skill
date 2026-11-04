@@ -60,12 +60,12 @@ done
 # --where: 이슈, repo, gh, jq 에 기대지 않는 점검이라 다른 검사보다 앞에서 끝낸다
 if [ "$mode" = where ]; then
   [ $# = 0 ] && [ -z "$repo" ] || die "--where 는 인자를 받지 않는다: $*"
-  D=$(cd "$(dirname "$0")/.." && pwd -P)
+  D=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
   entries= verdict=
   if [ ! -f "$CFG/plugins/installed_plugins.json" ]; then verdict=NONE
   elif ! command -v jq >/dev/null 2>&1; then verdict=UNKNOWN
   elif entries=$(jq -r '(.plugins // {}) | to_entries[] | select(.key | startswith("agent-dispatch@"))
-                        | .key as $k | .value[] | "\($k)\t\(.version // "-")\t\(.installPath // "")"' \
+                        | .key as $k | .value[] | "\($k)\u001f\(.version // "")\u001f\(.installPath // "")"' \
                       "$CFG/plugins/installed_plugins.json" 2>/dev/null); then
     [ -n "$entries" ] || verdict=NONE
   else entries= verdict=UNKNOWN
@@ -73,14 +73,16 @@ if [ "$mode" = where ]; then
   where=copy
   if [ -z "$verdict" ]; then
     verdict=STALE
-    while IFS=$'\t' read -r k v ip; do
-      P=$(cd "$ip/skills/agent-dispatch" 2>/dev/null && pwd -P) || continue
+    # 구분자는 공백류가 아닌 \037 이라야 빈 version 이나 installPath 가 칸을 밀지 않는다
+    while IFS=$'\037' read -r k v ip; do
+      [ -n "$ip" ] || continue
+      P=$(CDPATH= cd -- "$ip/skills/agent-dispatch" 2>/dev/null && pwd -P) || continue
       if [ "$P" = "$D" ]; then where=plugin verdict=PLUGIN; break; fi
       [ "$verdict" = SAME ] || ! cmp -s "$D/SKILL.md" "$P/SKILL.md" 2>/dev/null || verdict=SAME
     done <<<"$entries"
   fi
   echo "WHERE $where $D"
-  [ -z "$entries" ] || while IFS=$'\t' read -r k v ip; do echo "INSTALLED $k $v $ip"; done <<<"$entries"
+  [ -z "$entries" ] || while IFS=$'\037' read -r k v ip; do echo "INSTALLED $k ${v:--} $ip"; done <<<"$entries"
   echo "VERDICT $verdict"
   exit 0
 fi
