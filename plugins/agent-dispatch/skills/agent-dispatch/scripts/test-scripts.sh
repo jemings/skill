@@ -753,6 +753,28 @@ case_where_outside_git_no_gh() { # git 밖, gh 없이 돈다(PATH 에 dirname, c
   ERR=$(cat "$TMP/se")
   expect_rc 0; expect_err_empty; expect_out_has "VERDICT STALE"
 }
+case_where_empty_version() { # version 이 빈 문자열이어도 칸이 밀리지 않아 PLUGIN, INSTALLED 의 installPath 칸이 맞다
+  where_setup
+  printf '{"plugins":{"agent-dispatch@skill":[{"scope":"user","installPath":"%s","version":""}]}}\n' "$WINST" > "$WH/cfg/plugins/installed_plugins.json"
+  run_where "$(WPLUG)" --where
+  expect_rc 0; expect_err_empty
+  expect_out "WHERE plugin $WINST/skills/agent-dispatch"$'\n'"INSTALLED agent-dispatch@skill - $WINST"$'\n'"VERDICT PLUGIN"
+}
+case_where_empty_installpath() { # installPath 가 빈 문자열인 항목은 건너뛰고 뒤 항목으로 PLUGIN, 칸은 밀리지 않는다
+  where_setup
+  printf '{"plugins":{"agent-dispatch@skill":[{"installPath":"","version":"2.0.0"},{"installPath":"%s","version":"1.11.0"}]}}\n' "$WINST" > "$WH/cfg/plugins/installed_plugins.json"
+  run_where "$(WPLUG)" --where
+  expect_rc 0; expect_err_empty
+  expect_out "WHERE plugin $WINST/skills/agent-dispatch"$'\n'"INSTALLED agent-dispatch@skill 2.0.0 "$'\n'"INSTALLED agent-dispatch@skill 1.11.0 $WINST"$'\n'"VERDICT PLUGIN"
+}
+case_where_cdpath() { # CDPATH 아래에 scripts/ 가 있고 상대 $0 으로 불러도 D 는 한 줄이고 PLUGIN
+  where_setup; mkdir -p "$WH/cdx/scripts"
+  RC=0
+  OUT=$(cd "$WINST/skills/agent-dispatch" && PATH="$STUB_BIN:$PATH" CDPATH=$WH/cdx CLAUDE_CONFIG_DIR=$WH/cfg GIT_CEILING_DIRECTORIES=$TMP timeout 20 bash scripts/in-flight.sh --where 2>"$TMP/se") || RC=$?
+  ERR=$(cat "$TMP/se")
+  expect_rc 0; expect_err_empty
+  expect_out "WHERE plugin $WINST/skills/agent-dispatch"$'\n'"INSTALLED agent-dispatch@skill 1.11.0 $WINST"$'\n'"VERDICT PLUGIN"
+}
 case_where_rejects_args() { # 인자를 주면 exit 2
   where_setup
   run_where "$(WCOPY)" --where 5
@@ -1047,6 +1069,9 @@ CASES=(
   'in-flight --where: 링크가 다른 곳을 가리키면 실제 경로로 STALE:case_where_symlink_to_copy'
   'in-flight --where: installPath 가 링크를 거쳐도 PLUGIN:case_where_installpath_via_symlink'
   'in-flight --where: git 밖, gh 없이 돈다:case_where_outside_git_no_gh'
+  'in-flight --where: version 이 빈 문자열이어도 PLUGIN:case_where_empty_version'
+  'in-flight --where: installPath 가 빈 문자열이면 건너뛴다:case_where_empty_installpath'
+  'in-flight --where: CDPATH 가 걸려도 상대 경로 실행이 PLUGIN:case_where_cdpath'
   'in-flight --where: 인자를 주면 exit 2:case_where_rejects_args'
   'in-flight --where: SKILL.md 정적 검사:case_where_skill_static'
   'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
