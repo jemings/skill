@@ -44,7 +44,7 @@ ship inside the plugin.
   live session already holds. The repo should have its triage labels
   (`needs-triage`, `ready-for-agent`, `ready-for-human` or their mapped names)
   and a map issue whose sub-issues use GitHub's native blocked-by dependencies.
-  pstack is not required: the five discipline cards in
+  pstack is not required: the six discipline cards in
   `references/disciplines.md` are condensed from pstack's (MIT) principle skills,
   each card naming its source.
 
