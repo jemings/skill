@@ -847,6 +847,8 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   done
   awk '/^## Report/ { f = 1; next } /^## / { f = 0 } f' "$ib" | grep -qF 'Out-of-scope shapes to reshape' || bad "(g) implement-brief 의 Report 절에 'Out-of-scope shapes to reshape' 가 없다"
   ax6=$(grep -F '6. **Repo rules**' "$rb" || true)
+  local ax5
+  ax5=$(grep -F '5. **Regressions**' "$rb" || true)
   [ -n "$ax6" ] || bad "(g) review-brief 에 축 6 줄이 없다"
   for f in 'Flag comments' 'excuse a workaround' 'only allowed exceptions' 'name the symbol' 'report it as out of scope' "${exc[@]}"; do
     case $ax6 in *"$f"*) ;; *) bad "(g) review-brief 축 6 줄에 '$f' 가 없다" ;; esac
@@ -892,7 +894,7 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
     case $ri in *"$f"*) ;; *) bad "(i) '실행 중에 낸 이슈를 넣는다' 절에 '$f' 가 없다" ;; esac
   done
   grep -qF '함께 처리한 범위 밖 버그' "$sk" || bad "(i) SKILL.md 에 '함께 처리한 범위 밖 버그' 가 없다"
-  grep -qF '처리한 착륙: #<PR>(#<이슈>[, 범위 밖 버그])' "$sk" || bad "(i) 상태 블록 착륙 줄에 '범위 밖 버그' 표식 꼴이 없다"
+  grep -qF '처리한 착륙: #<PR>(#<이슈>[, 범위 밖 버그]' "$sk" || bad "(i) 상태 블록 착륙 줄에 '범위 밖 버그' 표식 꼴이 없다"
   grep -qF '범위 밖으로 낸 이슈(즉시 진행 불가 버그' "$sk" || bad "(i) 상태 블록에 좁아진 '범위 밖으로 낸 이슈' 문구가 없다"
   grep -qF 'PR #<d>[, 범위 밖 버그]' "$sk" || bad "(i) 상태 블록 진행 목록 줄 꼴에 '[, 범위 밖 버그]' 가 없다"
   grep -qF '#<w> 구현 대기[, #<K> 를 기다림][, 범위 밖 버그]' "$sk" || bad "(i) 상태 블록 구현 대기 줄 꼴에 '[, 범위 밖 버그]' 가 없다"
@@ -906,6 +908,35 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   [ -f "$ts" ] || bad "(i) tool-sharing.md 가 없다"
   grep -qF 'SKILL.md 1단계' "$ts" && grep -qF '5항의 버그가 아니' "$ts" || bad "(i) tool-sharing.md 에 새 근거 'SKILL.md 1단계 5항의 버그가 아니' 가 없다"
   grep -qF '범위 안이어야 하기 때문이다' "$ts" && bad "(i) tool-sharing.md 에 옛 근거 '범위 안이어야 하기 때문이다' 가 남아 있다"
+  # (j) 수정이 새 결함을 들이면 한 칸 올리고 회귀 주의를 싣는다: 등급 절 계기와 판정, 1단계 5항, 7단계 걸림, 상태 블록, 8단계, 두 지시문
+  local gr th line n
+  gr=$(awk '/^- \*\*한 칸 올려 다시 보낸다\*\*/ { f = 1; print; next } /^- \*\*사람에게 넘긴다\*\*/ { f = 0 } f' "$sk")
+  [ -n "$gr" ] || bad "(j) 등급 절에 '한 칸 올려 다시 보낸다' 항목이 없다"
+  for f in '수정이 새 결함을 들였다' '이슈 안: ' '이슈 사이: ' '거짓 시험, 범위 밖 변경, 규칙 위반은 계기가 아니다' '견주어 높은 쪽' '`blocker`/`major`' '`SendMessage` 가 아니라 한 칸 올려' '원인 PR 의 구현 등급보다 한 칸 위' '수정 전 사본에서 재현이 없고' '수정 사본에서 있다' '판정을 못 하면 계기로 치지 않는다' '`Regression warning`' '`올림` 으로 센다' '올림은 이슈당 한 번이다' '0 으로 되돌린다' '더 올리지 않고' '리뷰 등급은 그대로다' '그 Fix 를 보내던 때의 PR HEAD' '동작이 깨졌다고 재현되는' '결함을 고친 Fix 라운드가 든 PR' '`Failed premise` 대신' '원인 PR 등급이 가장 높으면' '모르면 계약서 기준 등급' '진행 목록에 `올림 1` 로 적고' '`올림 0` 이다' '원인 이슈와 PR 을 적는다' '같은 내용을 메시지에 넣는다' '그 뒤 상한을 넘으면 사람에게 넘긴다'; do
+    case $gr in *"$f"*) ;; *) bad "(j) 등급 절 '한 칸 올려 다시 보낸다' 항목에 '$f' 가 없다" ;; esac
+  done
+  case $ts5 in *'이슈 사이 계기대로 매긴다'*) ;; *) bad "(j) 1단계 5항에 등급 문구 '이슈 사이 계기대로 매긴다' 가 없다" ;; esac
+  grep -F '1. **착륙 기록**' "$sk" >/dev/null && awk '/^1\. \*\*착륙 기록\*\*/ { f = 1 } /^2\. 넣는다/ { f = 0 } f' "$sk" | grep -qF '계기가 있었으면 계기(이슈 안 / 이슈 사이)와 올린 등급' || bad "(j) 8단계 1항 착륙 기록에 계기 구절이 없다"
+  grep -qF '처리한 착륙: #<PR>(#<이슈>[, 범위 밖 버그][, 유발 #<n>])' "$sk" || bad "(j) 상태 블록 처리한 착륙 꼴에 '[, 유발 #<n>]' 가 없다"
+  grep -F 'LANDED #P <sha> ISSUE #N CLOSED' "$sk" | grep -qF '`유발 #<n>` 도 함께 옮긴다' || bad "(j) 8단계 CLOSED 행에 유발 옮기기 구절이 없다"
+  case $ts5 in *'`유발 #N(PR #P)`'*) ;; *) bad "(j) 1단계 5항에 '유발 #N(PR #P)' 표식이 없다" ;; esac
+  case $(awk '/^6\. \*\*리뷰 결과를 판정한다\*\*/ { f = 1; print; next } /^7\. / { f = 0 } f' "$sk") in *'이 PR 의 Fix 가 들인 회귀'*'(판정은 등급 절)'*) ;; *) bad "(j) 7단계 6항에 '이 PR 의 Fix 가 들인 회귀' 구절이 없다" ;; esac
+  th=$(awk '/^\*\*걸림\*\*/ { f = 1 } f && /^$/ { exit } f' "$sk")
+  case $th in *'다음 Fix 는 한 칸 올려 다시 보낸다(등급 절의 올림 한 번 규칙대로)'*) ;; *) bad "(j) 7단계 걸림 문단에 '다음 Fix 는 한 칸 올려 다시 보낸다' 가 없다" ;; esac
+  for f in '#<z> 수정, ' '#<w> 구현 대기'; do
+    line=$(grep -F -- "$f" "$sk" | tail -n 1)
+    case $line in *'[, 유발 #<n>(PR #<p>)]'*) ;; *) bad "(j) 상태 블록 '$f' 줄에 '[, 유발 #<n>(PR #<p>)]' 가 없다" ;; esac
+  done
+  n=$(grep -cF 'Regression warning' "$ib" || true)
+  [ "$n" -ge 2 ] || bad "(j) implement-brief 에 Regression warning 칸이 둘(이어 하기 줄, 결함 절차) 아니다: $n"
+  for line in "$(grep -F '**Continue existing work.**' "$ib")" "$(grep -F '**Regression warning**' "$ib")"; do
+    for f in 'Regression warning' 'Repro:' 'Missed because:' 'red before the fix' 'original fix'; do
+      case $line in *"$f"*) ;; *) bad "(j) implement-brief 의 Regression warning 칸에 '$f' 가 없다" ;; esac
+    done
+  done
+  for f in '<이슈 사이 계기면 남긴다:' 'original fix' 'regression test' 'undo'; do
+    case $ax5 in *"$f"*) ;; *) bad "(j) review-brief 축 5 줄에 '$f' 가 없다" ;; esac
+  done
 }
 
 # ---- 정적 검사 ----
