@@ -837,6 +837,27 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
     hit=$(printf '%s\n' "$lines" | grep -vE -- '--json ([a-z]+,)*body(,| )' || true)
     [ -z "$hit" ] || bad "(f) $(basename "$f") 의 조회 예시가 --json 으로 본문(body)을 받지 않는다: $hit"
   done
+  # (g) 주석 규칙: 구현 지시문의 상시 줄(변명 금지, only 한정, 공개 계약 예외, 린트 억제, 범위 밖은 보고), 리뷰 지시문 축 6 의 줄, 표 정정
+  local rb=$dir/references/review-brief.md ax6 cm exc
+  exc=('external dependency' 'public contract' '`-h`' 'API doc comment' 'license header' 'issue link' 'lint suppression directive with the reason the rule does not apply there')
+  cm=$(grep -F -- '- **Comments**:' "$ib" || true)
+  [ -n "$cm" ] || bad "(g) implement-brief 에 Comments 줄이 없다"
+  for f in 'excuse a workaround' 'may state only' 'leave the code as it is' 'list it in the report as out of scope' "cannot be done without working around that shape, stop and report instead" "${exc[@]}"; do
+    case $cm in *"$f"*) ;; *) bad "(g) implement-brief 의 Comments 줄에 '$f' 가 없다" ;; esac
+  done
+  awk '/^## Report/ { f = 1; next } /^## / { f = 0 } f' "$ib" | grep -qF 'Out-of-scope shapes to reshape' || bad "(g) implement-brief 의 Report 절에 'Out-of-scope shapes to reshape' 가 없다"
+  ax6=$(grep -F '6. **Repo rules**' "$rb" || true)
+  [ -n "$ax6" ] || bad "(g) review-brief 에 축 6 줄이 없다"
+  for f in 'Flag comments' 'excuse a workaround' 'only allowed exceptions' 'name the symbol' 'report it as out of scope' "${exc[@]}"; do
+    case $ax6 in *"$f"*) ;; *) bad "(g) review-brief 축 6 줄에 '$f' 가 없다" ;; esac
+  done
+  case $ax6 in *'implement-brief'*) bad "(g) review-brief 축 6 줄이 리뷰어가 받지 않는 implement-brief 를 가리킨다" ;; esac
+  sec=$(awk '/^## 쓰지 않는 것/ { f = 1; next } /^##/ { f = 0 } f' "$dc")
+  [ -n "$sec" ] || bad "(g) disciplines.md 에 '## 쓰지 않는 것' 절이 없거나 비었다"
+  hit=$(printf '%s\n' "$sec" | grep -iE 'comment[-_ ]?sicko' || true)
+  [ -z "$hit" ] || bad "(g) disciplines.md 의 쓰지 않는 것 표에 comment-sicko 가 있다: $hit"
+  printf '%s\n' "$sec" | grep -qF '`no-comments`' || bad "(g) disciplines.md 의 쓰지 않는 것 표에 no-comments 행이 없다"
+  awk '/^## 이미 있는 것/ { f = 1; next } /^##/ { f = 0 } f' "$dc" | grep -qE '^\| `comment-sicko`' || bad "(g) disciplines.md 의 이미 있는 것 표에 comment-sicko 행이 없다"
 }
 
 # ---- 정적 검사 ----
