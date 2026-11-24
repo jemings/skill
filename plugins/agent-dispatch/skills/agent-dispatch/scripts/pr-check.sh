@@ -2,13 +2,14 @@
 # pr-check.sh -- PR 의 모양을 본다(agent-dispatch 7단계 1항). 시험을 돌리기 전, 리뷰어를 띄우기 전에 돌린다.
 # 시험 결과를 PR HEAD 의 증거로 받을 수 있는지도 판정한다(7단계 3항, 걸림).
 #
-#   pr-check.sh --repo O/R --pr P --worktree W [--base B] [--sha S] [--closes N] [--forbid-trailer ERE]... [--forbid-path ERE]...
+#   pr-check.sh --repo O/R --pr P --worktree W [--base B] [--sha S] [--closes N] [--draft] [--forbid-trailer ERE]... [--forbid-path ERE]...
 #               [--verdict LOG=TEXT]... [--carry SHA [--may-touch ERE]...]...
 #
 #   --worktree W        그 PR 브랜치의 worktree. HEAD 와 작업 트리를 본다
 #   --base B            대상 브랜치(기본: 저장소의 기본 브랜치). stacked PR 의 위층이면 앞 층의 브랜치를 준다
 #   --sha S             구현자가 보고한 시험 SHA. PR HEAD 와 같아야 한다
 #   --closes N          base 이후 커밋 메시지 가운데 하나에 "Closes #N"(Fixes, Resolves 도)이 있어야 한다
+#   --draft             PR 이 draft 여야 한다(검수 중인 PR 은 draft 다). 주지 않으면 draft 여부를 보지 않는다
 #   --forbid-trailer E  base 이후 커밋 메시지에 E 에 맞는 줄이 있으면 안 된다(예: '^Co-Authored-By:')
 #   --forbid-path E     base 이후 바뀐 파일 경로가 E 에 맞으면 안 된다(예: '^CHANGELOG\.md$')
 #   --verdict LOG=TEXT  판정 줄(b): 로그 LOG 에 고정 문자열 TEXT 가 든 줄이 있어야 받는다. TEXT 의 {sha} 는
@@ -34,7 +35,7 @@ die() { echo "pr-check: $*" >&2; exit 2; }
 usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }
 value() { [ -n "${2:-}" ] || die "$1 에 값을 줘라"; }
 
-repo='' pr='' wt='' base='' sha='' closes=''
+repo='' pr='' wt='' base='' sha='' closes='' draft=0
 trailers=() paths=() verdicts=() carries=() nl=$'\n' cr=$'\r'
 while [ $# -gt 0 ]; do
   case $1 in
@@ -44,6 +45,7 @@ while [ $# -gt 0 ]; do
     --base) value "$@"; base=$2; shift 2 ;;
     --sha) value "$@"; sha=$2; shift 2 ;;
     --closes) value "$@"; closes=$2; shift 2 ;;
+    --draft) draft=1; shift ;;
     --forbid-trailer) value "$@"; trailers+=("$2"); shift 2 ;;
     --forbid-path) value "$@"; paths+=("$2"); shift 2 ;;
     --verdict) value "$@"; want=${2#*=}
@@ -84,6 +86,10 @@ if [ -z "$base" ]; then
 fi
 
 [ "$state" = OPEN ] && ok "열림" || fail "열림" "PR 이 $state 다"
+if [ "$draft" = 1 ]; then
+  isdraft=$(view isDraft .isDraft) || isdraft='?'
+  [ "$isdraft" = true ] && ok "draft" || fail "draft" "PR 이 draft 가 아니다(isDraft=$isdraft)"
+fi
 [ "$prbase" = "$base" ] && ok "대상 $base" || fail "대상" "PR 의 대상이 $prbase 인데 $base 여야 한다"
 local_head=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || local_head=''
 [ "$local_head" = "$head" ] && ok "HEAD ${head:0:12}" || fail "HEAD" "PR HEAD ${head:0:12} 와 worktree HEAD ${local_head:0:12} 가 다르다"
