@@ -19,11 +19,11 @@
 #
 # 본문 선행: 열려 있고 담당인 이슈의 본문만 본다(OTHERS, 닫힌 이슈는 보지 않는다). 본문의 첫 비어 있지 않은 5줄 가운데
 # 앞의 비문자 접두(장식 기호, -, >, ** 등)를 건너뛴 뒤 "선행" 또는 "Blocked by"(b/B)로 시작하고 ":" 가 따르는 줄에서
-# #N 과 owner/repo#N 을 모두 모은다(여러 줄이면 합집합, 자기 번호는 뺀다. "선행: 없음" 은 빈 집합).
+# #N 과 owner/repo#N 을 모두 모은다(여러 줄이면 합집합, 자기 번호는 뺀다. "선행: 없음"(또는 none, 대소문자 무관)으로 시작하는 줄은 뒤에 #N 이 있어도 빈 집합).
 # 참조마다 gh issue view 로 상태를 한 번씩 묻고 OPEN 인 것만 막는다(CLOSED, MERGED 는 풀림).
 # 저장소 이름은 대소문자를 가리지 않고(O/R#1 과 #1 은 같다), 나열은 저장소, 번호(숫자) 순이다.
 # 다른 저장소 참조는 소문자로 내고 조회도 소문자 저장소로 한다(GitHub 은 대소문자를 가리지 않는다).
-# 같은 줄의 다른 #N 도 모두 선행으로 모은다.
+# 같은 줄의 다른 #N 도 모두 선행으로 모은다(단 "없음"/none 으로 시작하는 줄은 예외다).
 # 하나라도 조회가 실패하면 "frontier: 선행 #N 조회 실패" 를 stderr 에 내고 exit 1 이다.
 # 지원하지 않는 것: 6번째 줄 이후의 선행, "선행:" 다음 줄의 목록형(- #1), URL 참조, docs/a.md#5 처럼 슬래시가 든 경로 조각도 저장소 참조로 읽어 조회 실패면 exit 1, 코드 펜스 구분(펜스 안의 "선행:" 도 5줄 안이면 읽는다), 선행의 선행(transitive),
 # 순환(서로 선행이면 영원히 BLOCKED).
@@ -67,7 +67,8 @@ defs='
   def mine: ($me == "") or (((.assignees|length)==0 and .user.login==$me) or any(.assignees[]; .login==$me));
   def prereqs: . as $i | ($repo|ascii_downcase) as $me_repo
     | [ (.body // "") | split("\n")[] | select(test("\\S")) ] | .[:5]
-    | [ .[] | select(test("^[^\\p{L}\\p{N}]*(선행|[Bb]locked [Bb]y)[*_\\s]*:")) | scan("(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+")
+    | [ .[] | select(test("^[^\\p{L}\\p{N}]*(선행|[Bb]locked [Bb]y)[*_\\s]*:"))
+        | select(test("^[^\\p{L}\\p{N}]*(선행|[Bb]locked [Bb]y)[*_\\s]*:[*_\\s]*(없음|[Nn][Oo][Nn][Ee])(?![\\p{L}\\p{N}])") | not) | scan("(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+")
         | index("#") as $h | { r: (.[:$h] | if . == "" then $me_repo else ascii_downcase end), n: (.[$h+1:] | tonumber) } ]
     | map(select(.r != $me_repo or .n != $i.number)) | unique_by([.r, .n]) | map("\(.r)#\(.n)");'
 
