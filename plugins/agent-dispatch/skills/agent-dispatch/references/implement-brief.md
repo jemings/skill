@@ -50,5 +50,6 @@ Stop and report, with the exact passage and evidence, when the contract contradi
 
 - PR URL(s) and the tested SHA; confirm it equals the PR HEAD.
 - Each completion criterion: met and how you checked it, or **not met** and what is missing (partly met is not met).
+- For each check that takes minutes: the log path (in `<scratch>`, outside the worktree) and the verdict line the runner printed with the full 40-char SHA, quoted as printed. Never write or edit a verdict line by hand. Runs meant as evidence happen on a clean tree at the exact SHA you push.
 - Deviations from the contract and why. Out-of-scope bugs with reproductions. Boundary notes for sibling issues.
 - Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run, or "none". Keep scratch scripts in `<scratch>`, outside the worktree.
