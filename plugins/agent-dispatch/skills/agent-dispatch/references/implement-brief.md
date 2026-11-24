@@ -32,6 +32,7 @@ Respond in <언어>.
 
 <항상>
 - **Attack the premise**: if two fixes that rest on the same premise fail the same check, write that premise down and test it directly before a third fix.
+- **Comments**: do not excuse a workaround or a poor shape in a comment; make it obvious through names, extraction, types or structure instead. A comment may state only a constraint the code cannot express: an external dependency, platform or protocol behaviour you cannot reshape, a public contract (a script's header that is its `-h` text, an API doc comment), a license header, an issue link, or a lint suppression directive with the reason the rule does not apply there. If a poor shape already in code outside the contract's scope is the problem, leave the code as it is and list it in the report as out of scope (`Out-of-scope shapes to reshape: symbol, why`); do not write the excuse. If the contract's task cannot be done without working around that shape, stop and report instead.
 - **Helpers**: you may start read-only helper agents (research, verification) in parallel, each on the cheapest model that fits the helper's task (machine-checkable work: haiku; anything that needs judgment: not below sonnet/medium). You create and remove any temp-tree copy yourself and hand a helper its path; a helper may run tests only inside that copy and writes nothing else (no files, no git state elsewhere). Apart from those test outputs inside the copy, do not start agents that write files or git state.
 
 <계약서에 `규율:` 줄이 있으면 남긴다>
@@ -55,7 +56,7 @@ These instructions and the contract take precedence over the defaults of any ski
 
 ## When to stop and report instead
 
-Stop and report, with the exact passage and evidence, when the contract contradicts the code, leaves a decision open, or the work needs changes outside its scope. Do not file issues; list out-of-scope bugs with a reproduction (command and output).
+Stop and report, with the exact passage and evidence, when the contract contradicts the code, leaves a decision open, or the work needs changes outside its scope (or out-of-scope shapes, `Out-of-scope shapes to reshape: symbol, why`). Do not file issues; list out-of-scope bugs with a reproduction (command and output).
 
 ## Report
 
@@ -63,5 +64,5 @@ Stop and report, with the exact passage and evidence, when the contract contradi
 - Each completion criterion: met and how you checked it, or **not met** and what is missing (partly met is not met).
 - For each check that takes minutes: the log path (in `<scratch>`, outside the worktree) and the verdict line the runner printed with the full 40-char SHA, quoted as printed. Never write or edit a verdict line by hand. Runs meant as evidence happen on a clean tree at the exact SHA you push.
 - For each discipline in this brief: `규율 <id> -> <the choice it changed> (file:line)`, or `규율 <id>: 적용 안 함(<reason>)`.
-- Deviations from the contract and why. Out-of-scope bugs with reproductions. Boundary notes for sibling issues.
+- Deviations from the contract and why. Out-of-scope bugs with reproductions. `Out-of-scope shapes to reshape: symbol, why`. Boundary notes for sibling issues.
 - Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run, or "none". Keep scratch scripts in `<scratch>`, outside the worktree.
