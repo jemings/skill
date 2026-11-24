@@ -784,12 +784,13 @@ case_where_rejects_args() { # 인자를 주면 exit 2
   expect_rc 2; expect_out_empty
 }
 case_where_skill_static() { # SKILL.md: CLAUDE_PLUGIN_ROOT 0건, 호출은 CLAUDE_SKILL_DIR, 0단계에 --where 와 쓰기 금지
-  local sk=$SCRIPTS/../SKILL.md bad_calls step0
+  local sk=$SCRIPTS/../SKILL.md bad_calls n_calls step0
   [ -f "$sk" ] || { bad "SKILL.md 가 없다: $sk"; return; }
   ! grep -q 'CLAUDE_PLUGIN_ROOT' "$sk" || bad "SKILL.md 에 CLAUDE_PLUGIN_ROOT 가 남았다"
   bad_calls=$(grep -nE '(in-flight|wait-prs)\.sh' "$sk" | grep -E 'bash "' | grep -v 'bash "\${CLAUDE_SKILL_DIR}/scripts/' || true)
   [ -z "$bad_calls" ] || bad "스크립트 호출이 \${CLAUDE_SKILL_DIR}/scripts/ 로 시작하지 않는다: $bad_calls"
-  [ "$(grep -c 'bash "${CLAUDE_SKILL_DIR}/scripts/' "$sk")" -ge 4 ] || bad "CLAUDE_SKILL_DIR 호출이 4곳 미만이다"
+  n_calls=$(grep -c 'bash "${CLAUDE_SKILL_DIR}/scripts/' "$sk")
+  [ "$n_calls" -ge 4 ] || bad "CLAUDE_SKILL_DIR 호출이 4곳 미만이다"
   step0=$(awk '/^## 0\./{f=1;next} /^## 1\./{f=0} f' "$sk")
   case $step0 in *'in-flight.sh" --where'*) ;; *) bad "0단계에 --where 호출이 없다" ;; esac
   case $step0 in *'쓰기를 하지 않는다'*) ;; *) bad "0단계에 쓰기 금지 문장이 없다" ;; esac
