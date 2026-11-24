@@ -66,6 +66,7 @@ expect_has() { case $OUT in *"$1"*) ;; *) bad "출력에 '$1' 이 없다: $OUT" 
 expect_not() { case $OUT in *"$1"*) bad "출력에 '$1' 이 있으면 안 된다: $OUT" ;; esac; }
 expect_called() { grep -qF -- "$1" "$ST/calls" 2>/dev/null || bad "gh 호출 '$1' 이 없다: $(tr '\n' '|' < "$ST/calls" 2>/dev/null)"; }
 expect_not_called() { ! grep -qF -- "$1" "$ST/calls" 2>/dev/null || bad "gh 호출 '$1' 이 있으면 안 된다"; }
+expect_err() { case $ERR in *"$1"*) ;; *) bad "stderr 에 '$1' 이 없다: $ERR" ;; esac; }
 expect_path() { [ -e "$1" ] || bad "$1 이 있어야 한다"; }
 expect_gone() { [ ! -e "$1" ] || bad "$1 이 없어야 한다"; }
 
@@ -187,6 +188,114 @@ t_check_unknown() {
   run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt"; expect_rc 0; expect_has "OK 충돌 없음"
 }
 t_check_args() { setup_repo; run pr-check.sh --repo o/r --pr 7 --worktree "$T/none"; expect_rc 2; }
+# 증거 판정(--verdict, --carry): EVIDENCE OK 나 RERUN 을 내되 fails 에 세지 않는다
+vsetup() { setup_repo; git -C "$T/wt" fetch -q origin; mkdir -p "$T/logs"; }
+vlog() { printf 'run e2e\n%s\n' "$1" > "$T/logs/e2e.log"; }
+t_check_verdict_ok() {
+  vsetup; vlog "통과: $HEAD_SHA e2e-login"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=통과: {sha} e2e-login"
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "EVIDENCE OK verdict#1 $T/logs/e2e.log: 통과: $HEAD_SHA e2e-login"; expect_not RERUN
+}
+t_check_verdict_short_sha() { # 12자 SHA 는 PR HEAD 의 증거가 아니다
+  vsetup; vlog "통과: ${HEAD_SHA:0:12}"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=통과: {sha}"
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "RERUN verdict#1 $T/logs/e2e.log"; expect_not "EVIDENCE OK"
+}
+t_check_verdict_old_sha() { # 앞 커밋에서 찍힌 판정 줄은 받지 않는다
+  vsetup; OLD=$(git -C "$T/wt" rev-parse HEAD~1); vlog "통과: $OLD"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=통과: {sha}"
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "RERUN verdict#1 $T/logs/e2e.log"; expect_not "EVIDENCE OK"
+}
+t_check_verdict_no_placeholder() { # {sha} 가 없는 글자는 아무 SHA 에나 맞으므로 인자 오류다
+  vsetup; vlog "통과: $HEAD_SHA"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=통과:"
+  expect_rc 2; expect_err "{sha}"; expect_not "SHAPE"
+}
+t_check_verdict_newline() { # 줄바꿈이 든 글자는 grep -F 가 패턴 여럿으로 가르므로 인자 오류다
+  vsetup; vlog "통과: $HEAD_SHA"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=x {sha}"$'\n'"통과"
+  expect_rc 2; expect_err "줄바꿈"; expect_not "SHAPE"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=통과: {sha}"$'\r'
+  expect_rc 2; expect_err "줄바꿈"; expect_not "SHAPE"
+}
+t_check_verdict_labels() { # 같은 로그를 여러 번 줘도 라벨이 순번으로 갈리고, 못 읽는 로그는 RERUN
+  vsetup; vlog "통과: $HEAD_SHA"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --verdict "$T/logs/e2e.log=통과: {sha}" \
+    --verdict "$T/logs/e2e.log=불가 {sha}" --verdict "$T/logs/none.log=통과: {sha}"
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "EVIDENCE OK verdict#1 $T/logs/e2e.log: 통과: $HEAD_SHA"
+  expect_has "RERUN verdict#2 $T/logs/e2e.log: "; expect_has "RERUN verdict#3 $T/logs/none.log: 로그를 읽지 못했다"
+}
+# carry_commit <메시지> <파일>... -- wt 에 파일을 고쳐 커밋하고 PR HEAD 를 그리로 옮긴다. OLD 는 앞 HEAD 다
+carry_commit() { local m=$1 f; shift; OLD=$(git -C "$T/wt" rev-parse HEAD)
+  for f in "$@"; do echo "$m" >> "$T/wt/$f"; done
+  git -C "$T/wt" add -A && git -C "$T/wt" commit -qm "$m"; carry_head; }
+carry_head() { HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD); pr 7 headRefOid="$HEAD_SHA"; }
+t_check_carry_same_tree() { # 메시지만 바꾼 HEAD 는 선언 없이 이어 받고, 선언이 없으면 tree 가 같을 때만 받는다
+  setup_repo; git -C "$T/wt" fetch -q origin; OLD=$HEAD_SHA
+  git -C "$T/wt" commit -q --amend -m "feat: b 다시"; carry_head
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD"
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "EVIDENCE OK carry#1 ${OLD:0:12}"; expect_not RERUN
+  local same=$OLD; carry_commit "chore: version" VERSION
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$same"
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "RERUN carry#1 ${same:0:12}: --may-touch 밖 경로 VERSION"; expect_not "EVIDENCE OK"
+}
+t_check_carry_allowed() { # 허용 경로는 합집합이다(두 경로가 각각 다른 ERE 에만 맞는다)
+  setup_repo; git -C "$T/wt" fetch -q origin; carry_commit "chore: version" VERSION CHANGELOG.md
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch '^CHANGELOG\.md$' --may-touch '^VERSION$'
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "EVIDENCE OK carry#1 ${OLD:0:12}: 2 files changed"; expect_not RERUN
+}
+t_check_carry_outside() { # 허용 밖 경로가 하나라도 있으면 다시 돌리라고 하고, 그 경로만 댄다
+  setup_repo; git -C "$T/wt" fetch -q origin; carry_commit "fix: src" VERSION src.sh
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch '^VERSION$'
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "RERUN carry#1 ${OLD:0:12}: "; expect_has "src.sh"; expect_not "VERSION"; expect_not "EVIDENCE OK"
+}
+t_check_carry_rebased() { # base 가 움직였으면 base 쪽 변경도 시험의 입력이다
+  setup_repo; OLD=$HEAD_SHA
+  ( cd "$T/repo" && echo s > sibling.sh && git add sibling.sh && git commit -qm "형제 PR" && git push -q origin main ) >/dev/null 2>&1
+  git -C "$T/wt" fetch -q origin && git -C "$T/wt" rebase -q origin/main >/dev/null 2>&1; carry_head
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch '^VERSION$'
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "RERUN carry#1 ${OLD:0:12}: "; expect_has "sibling.sh"; expect_not "EVIDENCE OK"
+}
+t_check_carry_bad_sha() {
+  setup_repo; run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry deadbeef
+  expect_rc 2; expect_err "deadbeef"; expect_not "SHAPE"
+}
+t_check_carry_ref() { # 참조 이름(HEAD, 브랜치, HEAD~1)과 7자 미만 SHA 는 받지 않는다. --carry HEAD 는 언제나 맞기 때문이다
+  setup_repo; run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry HEAD
+  expect_rc 2; expect_err "HEAD"; expect_not "SHAPE"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "${HEAD_SHA:0:6}"
+  expect_rc 2; expect_err "${HEAD_SHA:0:6}"; expect_not "SHAPE"
+}
+t_check_carry_wide_ere() { # 줄바꿈이 든 값, 빈 경로에도 맞는 ERE 는 모든 경로를 허용하므로 인자 오류다
+  setup_repo; git -C "$T/wt" fetch -q origin; carry_commit "fix: src" src.sh
+  local e
+  for e in '^VERSION$'$'\n' '^VERSION$'$'\n''^X$' '^VERSION$'$'\r' '^VERSION$|' '.*'; do
+    run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch "$e"
+    expect_rc 2; expect_err "--may-touch"; expect_not "EVIDENCE OK"
+  done
+}
+t_check_carry_bad_ere() { # 틀린 ERE 를 통과로 읽지 않는다
+  setup_repo; git -C "$T/wt" fetch -q origin; carry_commit "fix: src" src.sh
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch '^src\.sh$' --may-touch '['
+  expect_rc 2; expect_err "--may-touch"; expect_not "EVIDENCE OK"
+}
+t_check_carry_rename() { # 시험이 읽는 파일을 허용 경로로 옮기면 옛 경로가 RERUN 에 나온다
+  setup_repo; git -C "$T/wt" fetch -q origin; mkdir -p "$T/wt/lib"; seq 1 50 > "$T/wt/lib/reader.sh"; carry_commit "feat: reader"
+  OLD=$HEAD_SHA; mkdir -p "$T/wt/docs"; git -C "$T/wt" mv lib/reader.sh docs/reader.sh; git -C "$T/wt" commit -qm "mv"; carry_head
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch '^docs/'
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "RERUN carry#1 ${OLD:0:12}: --may-touch 밖 경로 lib/reader.sh"; expect_not "EVIDENCE OK"
+}
+t_check_carry_nonascii() { # 한글 경로도 ERE 에 그대로 맞는다
+  setup_repo; git -C "$T/wt" fetch -q origin; carry_commit "docs" "문서.md"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --may-touch '^문서\.md$'
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "EVIDENCE OK carry#1 ${OLD:0:12}"; expect_not RERUN
+}
+t_check_carry_two() { # --may-touch 는 바로 앞 --carry 에만 붙고, 같은 SHA 둘은 순번으로 갈린다
+  setup_repo; git -C "$T/wt" fetch -q origin; carry_commit "chore: version" VERSION
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --carry "$OLD" --carry "$OLD" --may-touch '^VERSION$'
+  expect_rc 0; expect_last "SHAPE OK"
+  expect_has "RERUN carry#1 ${OLD:0:12}: --may-touch 밖 경로 VERSION"; expect_has "EVIDENCE OK carry#2 ${OLD:0:12}: 1 file changed"
+}
 
 # ---- temp-tree.sh
 t_tree_roundtrip() { # 사본을 꺼내 의존성을 걸고 복사하고 표식을 쓰며, 작업 트리를 더럽히지 않고, 지우면 사라진다
@@ -287,7 +396,10 @@ t_frontier_body_fail() { fb_run '"선행: #9"' FAIL; expect_rc 1; case $ERR in *
 
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
-check_ok check_fails check_unknown check_args tree_roundtrip tree_refuses
+check_ok check_fails check_unknown check_args
+check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
+check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
+check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses
 mut_killed mut_survived mut_baseline_red mut_not_unique mut_literal frontier_map frontier_query
 frontier_body_open frontier_body_closed frontier_body_mid frontier_body_linked frontier_body_union frontier_body_refs frontier_body_repo_case frontier_body_cross_repo frontier_body_prefix
 frontier_body_others_skip frontier_body_fail'
