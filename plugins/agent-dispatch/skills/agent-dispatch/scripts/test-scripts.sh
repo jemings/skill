@@ -862,7 +862,7 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   local have
   have=$(awk '/^## 이미 있는 것/ { f = 1; next } /^##/ { f = 0 } f' "$dc")
   card=$(awk '$0 == "### laziness" { f = 1; next } /^##/ { f = 0 } f' "$dc")
-  for f in '호환 껍데기' '옛 호출자가 남을 때' 'Out-of-scope shapes to reshape' '계약서가 허용할 때만' '공개 계약은 예외' 'principle-migrate-callers-then-delete-legacy-apis'; do
+  for f in '호환 껍데기' '옛 호출자가 남을 때' 'Out-of-scope shapes to reshape' '계약서가 허용할 때만' '공개 계약은 예외' '범위 밖 호출자가 남은 옛 API' 'principle-migrate-callers-then-delete-legacy-apis'; do
     case $card in *"$f"*) ;; *) bad "(h) laziness 카드에 '$f' 가 없다" ;; esac
   done
   card=$(awk '$0 == "### foundational" { f = 1; next } /^##/ { f = 0 } f' "$dc")
@@ -885,6 +885,27 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   for f in 'blast-radius' 'principle-exhaust-the-design-space' 'principle-test-behavior-not-implementation'; do
     printf '%s\n' "$have" | grep -qE "^\| \`$f\`" || bad "(h) disciplines.md 의 이미 있는 것 표에 $f 행이 없다"
   done
+  # (i) 실행 중에 낸 이슈: 즉시 진행 가능한 버그는 범위와 상관없이 진행 목록에 넣는다
+  local ri
+  ri=$(awk '$0 == "### 실행 중에 낸 이슈를 넣는다" { f = 1; next } /^##/ { f = 0 } f' "$sk")
+  for f in '범위 밖 버그' '범위 판정과 상관없이' '`bug` 라벨' '재현 있는 결함' '같은 저장소' '사람 몫이 아니고' 'in-flight.sh' '진행 목록 밖' 'FREE' '넷 다 참'; do
+    case $ri in *"$f"*) ;; *) bad "(i) '실행 중에 낸 이슈를 넣는다' 절에 '$f' 가 없다" ;; esac
+  done
+  grep -qF '함께 처리한 범위 밖 버그' "$sk" || bad "(i) SKILL.md 에 '함께 처리한 범위 밖 버그' 가 없다"
+  grep -qF '처리한 착륙: #<PR>(#<이슈>[, 범위 밖 버그])' "$sk" || bad "(i) 상태 블록 착륙 줄에 '범위 밖 버그' 표식 꼴이 없다"
+  grep -qF '범위 밖으로 낸 이슈(즉시 진행 불가 버그' "$sk" || bad "(i) 상태 블록에 좁아진 '범위 밖으로 낸 이슈' 문구가 없다"
+  grep -qF 'PR #<d>[, 범위 밖 버그]' "$sk" || bad "(i) 상태 블록 진행 목록 줄 꼴에 '[, 범위 밖 버그]' 가 없다"
+  grep -qF '#<w> 구현 대기[, #<K> 를 기다림][, 범위 밖 버그]' "$sk" || bad "(i) 상태 블록 구현 대기 줄 꼴에 '[, 범위 밖 버그]' 가 없다"
+  local ts5 ts
+  ts5=$(printf '%s\n' "$ri" | awk '/^5\. / { f = 1 } f')
+  for f in '--claim' '7단계 7항'; do
+    case $ts5 in *"$f"*) ;; *) bad "(i) 5항(5a-5e)에 '$f' 가 없다" ;; esac
+  done
+  grep -qF '`처리한 착륙` 에 `#<PR>(#<이슈>, 범위 밖 버그)` 로 옮긴다' "$sk" || bad "(i) 8단계 CLOSED 행에 표식 옮기기 구절이 없다"
+  ts="$(dirname "$sk")/references/tool-sharing.md"
+  [ -f "$ts" ] || bad "(i) tool-sharing.md 가 없다"
+  grep -qF 'SKILL.md 1단계' "$ts" && grep -qF '5항의 버그가 아니' "$ts" || bad "(i) tool-sharing.md 에 새 근거 'SKILL.md 1단계 5항의 버그가 아니' 가 없다"
+  grep -qF '범위 안이어야 하기 때문이다' "$ts" && bad "(i) tool-sharing.md 에 옛 근거 '범위 안이어야 하기 때문이다' 가 남아 있다"
 }
 
 # ---- 정적 검사 ----
