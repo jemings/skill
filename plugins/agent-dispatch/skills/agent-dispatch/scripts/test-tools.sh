@@ -18,7 +18,7 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 
 # gh 스텁. 상태: $ST/pr_<N>.json, $ST/merge_err, $ST/repo.json, $ST/issue_<N>, $ST/mseq_<N>(mergeable 을 차례로 낸다),
-# $ST/sub_issues.json, $ST/search.json. 받은 호출은 $ST/calls 에 한 줄씩 남는다.
+# $ST/sub_issues.json, $ST/search.json. 받은 호출은 $ST/calls 에 한 줄씩 남는다. $ST/issue_<N> 내용이 FAIL 이면 조회가 exit 1 이다.
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 st=${ST:?}
@@ -41,7 +41,8 @@ case "$1 $2" in
     setf "$n" '.state="MERGED" | .mergeCommit={"oid":"cafebabe1234"}' ;;
   "pr close") setf "$3" '.state="CLOSED"' ;;
   "issue comment") cp "$(arg --body-file "$@")" "$st/comment_$3" ;;
-  "issue view") if [ -f "$st/issue_$3" ]; then cat "$st/issue_$3"; else echo OPEN; fi ;;
+  "issue view")
+    if [ -f "$st/issue_$3" ]; then [ "$(cat "$st/issue_$3")" != FAIL ] || { echo "gh: issue $3 not found" >&2; exit 1; }; cat "$st/issue_$3"; else echo OPEN; fi ;;
   "repo view") echo main ;;
   "api user") echo me ;;
   *)
@@ -246,10 +247,50 @@ t_frontier_query() {
   RUN_DIR=$T run frontier.sh --repo o/r --query x --map 1; RUN_DIR=''; expect_rc 2
 }
 
+# frontier 의 본문 선행 시험: fb_run <본문 JSON 문자열> [issue_9 상태] [blocked_by]. 이슈 #1 하나, 본문 선행은 #9 를 가리킨다
+fb_run() {
+  T=$(mktemp -d "$ROOT/f.XXXX"); ST=$T/st; mkdir -p "$ST"; export ST
+  [ -z "${2:-}" ] || printf '%s\n' "$2" > "$ST/issue_9"
+  printf '[{"number":1,"state":"open","title":"t","labels":[],"user":{"login":"me"},"assignees":[],"issue_dependencies_summary":{"blocked_by":%s},"body":%s}]\n' "${3:-0}" "$1" > "$ST/sub_issues.json"
+  RUN_DIR=$T run frontier.sh --repo "${4:-o/r}" --map 9; RUN_DIR=''
+}
+t_frontier_body_open() { fb_run '"\u26d4 선행: #9 끝날 때까지\n\n본문"' OPEN
+  expect_rc 0; expect_has "BLOCKED"$'\t'"#1"$'\t\t'"t"$'\t'"선행 #9(본문), 링크 없음"; expect_called "issue view 9 --repo o/r --json state"; }
+t_frontier_body_closed() { fb_run '"\u26d4 선행: #9"' CLOSED; expect_rc 0; expect_has "READY"$'\t'"#1"; expect_not BLOCKED
+  fb_run '"선행: #9"' MERGED; expect_has "READY"$'\t'"#1"; }
+t_frontier_body_mid() { fb_run '"a\nb\n\nc\nd\ne\nf\n선행: #9"' OPEN; expect_rc 0; expect_has "READY"$'\t'"#1"; expect_not_called "issue view"
+  fb_run '"a\nb\nc\nd\ne\n\n\uc120\ud589: #9"' OPEN; expect_has "READY"$'\t'"#1"
+  fb_run '"a\n\n\nb\nc\nd\n선행: #9"' OPEN; expect_has "BLOCKED"; }
+t_frontier_body_linked() { fb_run '"선행: #9"' OPEN 1; expect_rc 0; expect_has "BLOCKED"$'\t'"#1"$'\t\t'"t"$'\t'"선행 #9(본문)"; expect_not "링크 없음"; }
+t_frontier_body_cross_repo() { fb_run '"선행: x/y#3 와 #9"' OPEN; expect_rc 0
+  expect_called "issue view 3 --repo x/y"; expect_called "issue view 9 --repo o/r"; expect_has "선행 #9 x/y#3(본문)"; }
+t_frontier_body_union() { fb_run '"\uc120\ud589: #9\nBlocked by: x/y#3"' OPEN; expect_rc 0
+  expect_called "issue view 9 --repo o/r"; expect_called "issue view 3 --repo x/y"; expect_has "선행 #9 x/y#3(본문)"; }
+t_frontier_body_refs() {
+  fb_run '"\uc120\ud589: o/r2#3"' OPEN; expect_called "issue view 3 --repo o/r2"; expect_has "선행 o/r2#3(본문)"
+  fb_run '"\uc120\ud589: \uc774\uc288/\uac74#3"' OPEN; expect_rc 0; expect_called "issue view 3 --repo o/r"; expect_not_called "--repo 이슈"
+  fb_run '"\uc120\ud589: O/R#1"' OPEN; expect_rc 0; expect_has "READY"$'\t'"#1"
+  fb_run '"\uc120\ud589: O/R#9 #9"' OPEN; expect_has "선행 #9(본문)"; expect_not "#9 #9"
+  fb_run '"\uc120\ud589: #10, #9, #9"' OPEN; expect_has "선행 #9 #10(본문)"; }
+t_frontier_body_repo_case() { fb_run '"\uc120\ud589: #9 o/r#9 O/R#1"' OPEN 0 O/R; expect_rc 0
+  expect_has "BLOCKED"$'\t'"#1"$'\t\t'"t"$'\t'"선행 #9(본문), 링크 없음"; expect_not "#9 #9"; expect_not_called "issue view 1 "; expect_called "issue view 9 --repo o/r"; }
+t_frontier_body_prefix() { local b
+  for b in '"Blocked By: #9"' '"- Blocked by: #9"' '"**선행**: #9"' '"> blocked by: #9"'; do fb_run "$b" OPEN; expect_has "선행 #9(본문)"; done
+  fb_run '"선행: 없음"' OPEN; expect_has "READY"; fb_run 'null' OPEN; expect_has "READY"
+  fb_run '"선행: #1 #9"' OPEN; expect_has "선행 #9(본문)"; expect_not "#1 #9"; }
+t_frontier_body_others_skip() {
+  T=$(mktemp -d "$ROOT/f.XXXX"); ST=$T/st; mkdir -p "$ST"; export ST
+  echo '[{"number":3,"state":"open","title":"theirs","labels":[],"user":{"login":"bob"},"assignees":[],"issue_dependencies_summary":{"blocked_by":0},"body":"선행: #9"},
+   {"number":4,"state":"closed","title":"done","labels":[],"user":{"login":"me"},"assignees":[],"issue_dependencies_summary":{"blocked_by":0},"body":"선행: #9"}]' > "$ST/sub_issues.json"
+  RUN_DIR=$T run frontier.sh --repo o/r --map 9; RUN_DIR=''; expect_rc 0; expect_has OTHERS; expect_not_called "issue view"; }
+t_frontier_body_fail() { fb_run '"선행: #9"' FAIL; expect_rc 1; case $ERR in *"frontier: 선행 #9 조회 실패"*) ;; *) bad "stderr: $ERR" ;; esac; }
+
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
 check_ok check_fails check_unknown check_args tree_roundtrip tree_refuses
-mut_killed mut_survived mut_baseline_red mut_not_unique mut_literal frontier_map frontier_query'
+mut_killed mut_survived mut_baseline_red mut_not_unique mut_literal frontier_map frontier_query
+frontier_body_open frontier_body_closed frontier_body_mid frontier_body_linked frontier_body_union frontier_body_refs frontier_body_repo_case frontier_body_cross_repo frontier_body_prefix
+frontier_body_others_skip frontier_body_fail'
 ran=0
 for c in $CASES; do
   label=${c//_/ }
