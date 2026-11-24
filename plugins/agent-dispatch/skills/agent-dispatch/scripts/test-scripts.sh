@@ -1042,11 +1042,22 @@ run_case() { # <표시 이름> <함수> [인자...]
   local label=$1; shift
   CASE=$label BAD=0
   rm -rf "$STUB_DATA"; mkdir -p "$STUB_DATA"   # 앞 경우의 fixture 가 남지 않게
-  "$@"
+  if declare -F "$1" >/dev/null; then "$@"; else bad "$1 함수가 없다"; fi
   if [ $BAD = 0 ]; then PASS=$((PASS + 1)); printf 'PASS %s\n' "$label"; else FAIL=$((FAIL + 1)); fi
 }
 
+# CASES 에 적힌 함수가 없으면(오타, 이름 바꾸기, 지운 함수) 그 경우를 FAIL 로 센다. 이 하네스의 복사본에 없는 함수를 끼워 돌려 본다.
+case_missing_case_fn() {
+  local cp=$STUB_DATA/../self.sh
+  sed -e "s|^SCRIPTS=.*|SCRIPTS=$SCRIPTS|" -e "s|^CASES=(\$|&\n  'no such case:case_no_such_fn native'|" "${BASH_SOURCE[0]}" > "$cp"
+  run_nested=$(ONLY='^no such case$' bash "$cp" 2>&1); local rc=$?
+  [ "$rc" = 1 ] || bad "exit 1 이어야 하는데 $rc ($run_nested)"
+  case $run_nested in *'FAIL no such case: case_no_such_fn 함수가 없다'*) ;; *) bad "FAIL 줄이 없다: $run_nested" ;; esac
+  case $run_nested in *'PASS no such case'*) bad "PASS 로 셌다: $run_nested" ;; esac
+}
+
 CASES=(
+  'case 함수가 없으면 FAIL:case_missing_case_fn native'
   'wait-prs --other 5 -> MERGED 5:case_wait_other_merged native'
   'wait-prs 7 -> CONFLICTING 7:case_wait_mine_conflicting native'
   'wait-prs 7 -> MERGED 7:case_wait_mine_merged native'
