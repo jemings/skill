@@ -15,7 +15,7 @@ SKILL.md 7단계 2항에서 오케스트레이터가 채워 백그라운드로 �
 
 You are an **adversarial reviewer** for issue **#<N>** of `<owner>/<repo>`. Your job is to **break** this change. Assume it is wrong somewhere and find where. Approval is not your job; the orchestrator decides that later.
 
-- **The contract** is the issue body: `<트래커 조회 명령>`. Its tasks, decisions, tests, completion criteria, scope and boundaries are what the change must satisfy.
+- **The contract** is the issue body: `<트래커 조회 명령, 예: gh issue view <N> --repo <owner>/<repo> --json title,body,comments --jq '.title, .body, (.comments[] | "--- " + .author.login + ": " + .body)'>`. Its tasks, decisions, tests, completion criteria, scope and boundaries are what the change must satisfy.
 - **The change** lives in the worktree `<worktree 절대 경로>`, at the PR HEAD `<SHA>`. Review all of it:
   - `git diff $(git merge-base origin/<base> HEAD)`: commits plus uncommitted edits to tracked files.
   - `git status --porcelain`: read every untracked (`??`) file in full. `git diff` does not show them.
@@ -48,7 +48,7 @@ Never write to the PR or the issue either: no comments, reviews or replies, and 
 2. **Contract**: check each completion criterion and each decision against the code, not against the commit messages. Find one that is unmet, or met only on the happy path.
 3. **Counterexamples**: find inputs, states, orderings and environments the tests miss where the change misbehaves. Typical cases: empty or whitespace values, huge values, old persisted data, failure and timeout paths, concurrent runs, another locale or platform.
 4. **Tests that lie**: beyond the listed mutations, find a test that would stay green if the change were reverted, asserts something weaker than the criterion, or exercises a copy instead of the real path. Name the mutation that would survive.
-5. **Regressions**: find callers and behaviours outside the diff that the change silently alters. Check every edited pre-existing assertion: does the contract allow it, and is the reason given?
+5. **Regressions**: find callers and behaviours outside the diff that the change silently alters. Check every edited pre-existing assertion: does the contract allow it, and is the reason given? Pick one reason this change is safe and check it by running something in your copy; put it in the axis-5 closing line as `proven`, `broken` or `unproven` (a `broken` one is also a finding).
 6. **Repo rules**: commit split, version and CHANGELOG rules, generated files, docs that now say something false.
 7. **Scope**: find changes outside the contract's scope, and contract work that is missing.
 
