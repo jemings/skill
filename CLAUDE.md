@@ -80,3 +80,21 @@ ONLY='git 밖'` 처럼 쓴다. `$TMP` 의 사본에만 변이를 걸어 원본�
 ```bash
 bash scripts/check-ascii.sh plugins/agent-dispatch
 ```
+
+## agent-dispatch 의 셸 스크립트를 고치면 따옴표 짝을 검사한다
+
+사내 스킬 스캐너(`cisco-ai-skill-scanner` 2.3.2)는 주석을 떼어 낼 때 따옴표 상태를
+줄 사이로 이어 간다. `"$(grep -c '..."...' ...)"` 꼴의 한 줄에서 짝이 어긋나면
+파일 끝까지 따옴표가 열린 채로 남고, 그 뒤의 한글 주석이 코드로 분석되어
+`HOMOGLYPH_ATTACK`(HIGH)이 난다(#38). `check-ascii.sh` 는 한글을 허용해 못 잡는다.
+
+`plugins/agent-dispatch/` 의 셸 스크립트를 고쳤다면 커밋 전에 돌린다. 걸리면
+`파일:줄:상태` 가 나오니 그 줄의 `"$( ... '..."...' )"` 꼴을 변수 대입으로 풀어 쓴다.
+heredoc 본문의 홀수 따옴표도 스캐너는 어긋남으로 센다(heredoc 을 파싱하지 않는다).
+이 도구를 고쳤다면 하네스를 돌린다(`SCANNER_PY` 에 스캐너가 깔린 python 을 주면
+스캐너 원함수와 끝 상태를 대조하는 차분 시험도 돈다):
+
+```bash
+bash scripts/check-quotes.sh plugins/agent-dispatch
+bash scripts/test-check-quotes.sh
+```
