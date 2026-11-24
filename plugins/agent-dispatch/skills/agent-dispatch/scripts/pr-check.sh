@@ -103,6 +103,9 @@ case $mergeable in
   *) fail "충돌" "mergeable=$mergeable" ;;
 esac
 
+# --forbid-path 와 carry 의 diff: rename 을 옛 경로와 새 경로로 가르고(--no-renames), 비ASCII 경로를 글자 그대로 낸다
+cdiff() { git -C "$wt" -c core.quotePath=false diff --no-renames "$@"; }
+
 # base 이후의 범위: 원격의 대상 브랜치가 있으면 그것과의 merge-base
 remote_base=''
 for r in $(git -C "$wt" remote); do
@@ -124,7 +127,7 @@ else
     [ -z "$hit" ] && ok "커밋 메시지에 /$e/ 없음" || fail "커밋 메시지" "/$e/ 에 맞는 줄: $hit"
   done
   if [ ${#paths[@]} -gt 0 ]; then
-    changed=$(git -C "$wt" diff --name-only "$mb" HEAD)
+    changed=$(cdiff --name-only "$mb" HEAD)
     for e in "${paths[@]}"; do
       hit=$(printf '%s\n' "$changed" | grep -E "$e" | head -3 | tr '\n' ' ')
       [ -z "$hit" ] && ok "바뀐 파일에 /$e/ 없음" || fail "바뀐 파일" "/$e/ 에 맞는 파일: $hit"
@@ -140,8 +143,6 @@ for v in ${verdicts[@]+"${verdicts[@]}"}; do
   hit=$(grep -F -m1 -- "$want" "$log")
   [ -n "$hit" ] && echo "EVIDENCE OK $label: $hit" || echo "RERUN $label: '$want' 가 든 줄이 없다"
 done
-# carry 의 diff: rename 을 옛 경로와 새 경로로 가르고(--no-renames), 비ASCII 경로를 글자 그대로 낸다
-cdiff() { git -C "$wt" -c core.quotePath=false diff --no-renames "$@"; }
 k=0
 for c in ${carries[@]+"${carries[@]}"}; do
   k=$((k + 1)); from=$(git -C "$wt" rev-parse "${c%%"$nl"*}^{commit}"); label="carry#$k ${from:0:12}"

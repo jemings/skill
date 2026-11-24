@@ -183,6 +183,12 @@ t_check_fails() { # 각 검사가 저마다 걸린다
   expect_rc 1; expect_last "SHAPE FAIL"
   for w in "FAIL 대상" "FAIL HEAD" "FAIL 보고한 SHA" "FAIL 작업 트리" "FAIL 충돌" "FAIL Closes" "FAIL 커밋 메시지" "FAIL 바뀐 파일"; do expect_has "$w"; done
 }
+t_check_forbid_rename() { # 금지 경로를 이름 바꾸기로 옮겨도 옛 경로로 걸린다
+  setup_repo; git -C "$T/wt" fetch -q origin
+  ( cd "$T/wt" && git mv a moved-a && git commit -qm "chore: move" ) >/dev/null
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --forbid-path '^a$'
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL 바뀐 파일"
+}
 t_check_unknown() {
   setup_repo; git -C "$T/wt" fetch -q origin; pr 7 mergeable=UNKNOWN; printf 'UNKNOWN\nMERGEABLE\n' > "$ST/mseq_7"
   run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt"; expect_rc 0; expect_has "OK 충돌 없음"
@@ -396,7 +402,7 @@ t_frontier_body_fail() { fb_run '"선행: #9"' FAIL; expect_rc 1; case $ERR in *
 
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
-check_ok check_fails check_unknown check_args
+check_ok check_fails check_forbid_rename check_unknown check_args
 check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
 check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses
