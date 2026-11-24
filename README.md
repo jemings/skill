@@ -24,6 +24,7 @@ no cross-plugin requirements. `agent-dispatch` drives skills from the external
 - **[GitHub CLI](https://cli.github.com)** authenticated (`gh auth login`).
   Needed by `gh-pr-reply`, `gh-pr-approve`, and `agent-delegation`.
 - **`jq`**, **`git`**, **`bash` 4+**.
+- `perl` for the maintainer guards under `scripts/` (`check-ascii.sh`, `check-quotes.sh`).
 - Optional: `shellcheck` (lint of any shell scripts), `actionlint` (workflow lint).
 - `statusline-kit`, `skill-optimizer`, and `agent-clinic` have no external dependencies
   beyond `bash`.
@@ -96,7 +97,9 @@ files — each is a self-contained, independently installable unit.
 .claude-plugin/
 └── marketplace.json                          # catalog: one entry per plugin below
 scripts/
-└── check-ascii.sh                            # maintainer guard: non-ASCII (besides Hangul) under a path; not shipped with plugins
+├── check-ascii.sh                            # maintainer guard: non-ASCII (besides Hangul) under a path; not shipped with plugins
+├── check-quotes.sh                           # maintainer guard: shell files whose quotes stay open to EOF (what the in-house scanner misreads, #38)
+└── test-check-quotes.sh                      # harness for check-quotes.sh (optional SCANNER_PY differential)
 plugins/
 ├── gh-pr-reply/   (plugin.json + skills/gh-pr-reply/{SKILL.md, references/})
 ├── gh-pr-approve/ (plugin.json + skills/gh-pr-approve/{SKILL.md, references/})
@@ -121,6 +124,8 @@ cleaned up on the next marketplace sync instead of failing to load.
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
 bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh incl. --where (gh stub that runs host jq, bash:3.2 if docker image exists)
 bash scripts/check-ascii.sh plugins/agent-dispatch                              # agent-dispatch must stay ASCII punctuation (exit 1 lists offenders)
+bash scripts/check-quotes.sh plugins/agent-dispatch                             # unbalanced quotes the in-house scanner would misread (exit 1 lists file:line:state)
+bash scripts/test-check-quotes.sh                                               # check-quotes.sh harness (SCANNER_PY=<scanner python> adds a differential run)
 ```
 
 ## License
