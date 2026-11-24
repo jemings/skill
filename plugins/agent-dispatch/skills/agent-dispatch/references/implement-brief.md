@@ -1,83 +1,54 @@
 # 구현 서브에이전트 지시문
 
-`agent-dispatch` 6단계에서 이슈마다 채워 보낸다. `<...>` 를 채우고, 그 이슈의 종류에 맞는 절차 하나만 남긴다.
-리뷰어는 서브에이전트가 띄우지 않는다. 7단계에서 오케스트레이터가 따로 띄운다.
+SKILL.md 6단계에서 이슈마다 채워 보낸다. `<...>` 를 채우고, 종류에 맞는 절차 하나만 남긴다. 이 파일을 가리키지 말고
+내용을 지시문에 그대로 넣는다. `<scripts>` 는 이 스킬의 `scripts/` 절대 경로다.
 
 ---
 
 Implement issue **#<N> "<제목>"** of `<owner>/<repo>`.
-- The issue body is your **contract**. Read it and its comments first: `<트래커 조회 명령>`.
-- Then read the repo's `CLAUDE.md`. Its rules bind you: worktree, tests and local CI, commits, PR, version and CHANGELOG, file ownership.
+- The issue body is your **contract**. Read it and every comment first: `<트래커 조회 명령>`.
+- Then read `<저장소 규칙 파일들>`. Its rules bind you: worktree, tests, commits, PR, version and CHANGELOG, file ownership.
 
 Respond in <언어>.
 
 ## Where to work
 
-- Work in your own worktree: `<저장소 규칙의 worktree 자리와 브랜치 이름, 예: .claude/worktrees/<N>-<slug>>`, created from the current `origin/<base>`.
-- Put the issue number `<N>` in both the worktree directory name and the branch name. Other sessions recognise work in flight by it.
-- Leave the main checkout and every other tree as they are.
-- <겹침이 있으면: #<M> 도 <파일> 을 바꾼다 -- 먼저 병합되는 쪽 위로 rebase 한다.>
-- <이어 하기면 위 첫 줄 대신 이 줄을 남긴다: **Continue existing work.** This issue already has worktree `<경로>` on branch `<브랜치>`<, open PR #<P>><, and merged PR #<Q>>. Work there and leave every other worktree, branch and PR alone. First read the PR body, its review comments, and `git log` since the base. Your request is a follow-up (see "Follow-up requests" below): **<Fix -- <고칠 점 목록> / Rebase / Next PR -- 계약서의 <k> 번째 PR>**.>
+- Create your own worktree from the current `origin/<base>`: `<worktree 만드는 명령, 이슈 번호가 든 경로와 브랜치>`.
+- Use absolute paths and `git -C <path>`; never `cd` into the main checkout. Leave every other tree as it is.
+- **Never run a bare `git stash`** (the stash is shared by all worktrees and sessions). Set work aside with a temporary commit.
+- To run an older commit (the pre-fix red check, a base comparison) use a throwaway copy:
+  `bash <scripts>/temp-tree.sh add <scratch>/<name> <commit> <--link/--copy 목록>` and `... remove <path>` when done.
+- <이어 하기면 남긴다: **Continue existing work.** This issue already has worktree `<경로>` on branch `<브랜치>`<, open PR #<P>>. Work there. First read the PR body and `git log` since the base. Your request: **<Fix -- 항목 / Rebase / Next PR -- 계약서의 <k> 번째 PR>** (see "Follow-up requests").>
 
 ## Procedure
 
-<bug 라벨이면 이 절을 남긴다>
-**Diagnose, then fix.**
-1. Call the Skill tool with "diagnosing-bugs" and follow it.
-2. Even when the contract already names the cause, build the Phase 1 loop. It must go **red** on the reported symptom before you touch the fix.
-3. Write the regression test at the seam the contract names. Show it red on the pre-fix commit and green after the fix.
-4. When there are several defects, use one commit per defect, each with its own red->green.
+<bug 라벨이면>
+**Diagnose, then fix.** Call the Skill tool with "<diagnosing-bugs 의 정확한 이름>" and follow it. Build the Phase 1 loop so it goes **red** on the reported symptom before you touch the fix. Put the regression test at the seam the contract names; show it red on the pre-fix commit and green after. One commit per defect.
 
-<그 밖이면 이 절을 남긴다>
-**Implement.**
-1. Call the Skill tool with "tdd" and work test-first at the seams the contract names.
-2. Run typecheck and single test files regularly. Run the full suites once at the end.
-3. For a pure refactor, the contract's regression guards (snapshots, import guards) must stay green without editing their expectations. Any intended change must be called out with its reason, as the contract says.
+<그 밖이면>
+**Implement.** Call the Skill tool with "<tdd 의 정확한 이름>" and work test-first at the seams the contract names. For a pure refactor the contract's regression guards stay green without editing their expectations.
 
-<항상 남긴다>
-**Then, on either path:**
-1. Commit per the repo's conventions. Split commits by kind: code, tests, docs.
-2. **Tidy the history.** If a commit fixes something an earlier commit of this same PR introduced, fold it into that commit instead of leaving it as a separate one: `git commit --fixup=<that commit>`, then `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash $(git merge-base origin/<base> HEAD)`. Never merge. The repo is rebase-merge only, so the branch history lands on the base as is.
-3. **Do not spawn a reviewer.** The orchestrator runs the adversarial review in parallel with its own final check as soon as you hand over the PR.
-4. Run the repo's required tests on the exact SHA you will push. If no push hook runs them, run them by hand.
-5. Push and open the PR as the contract says: number of PRs, `Closes`/`Refs`, the passing SHA in the body, and a line `리뷰: 오케스트레이터가 수행`.
-   - Open it as a **draft** (`gh pr create --draft`). If the repo's tooling opens it for you, convert it with `gh pr ready --undo` right after.
-   - If drafts are unavailable, start the body with `> **주의** 오케스트레이터 검수 전 -- 병합하지 마세요.`
-   - The orchestrator reviews it, then marks it ready. Merging belongs to the repo's review process.
-   - Post no comments, reviews or replies on the PR, and never resolve a thread. Pushing, toggling draft and editing the body are fine. Report to the orchestrator instead.
+<항상>
+**Then:**
+1. Commit by kind (code, tests, docs) as the repo's conventions say. Put **`Closes #<N>` in the last commit message** of the last PR (landing tools may rewrite the PR body).
+2. Tidy the history: fold a fix of your own earlier commit into it (`git commit --fixup=<c>`, then `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash $(git merge-base origin/<base> HEAD)`). Never merge.
+3. Run the checks the contract and repo rules require on the exact SHA you push. Never skip hooks.
+4. Push and open **draft** PR(s) as the contract says (`gh pr create --draft`; stacked PRs: base = the previous PR's branch). Body: what and why, verification, a line `리뷰: 오케스트레이터가 수행`, plus anything the repo rules require.
+5. **Do not spawn a reviewer, do not mark the PR ready, do not merge or run the landing command.** The orchestrator reviews and lands it. Never comment on or review the PR; pushing, toggling draft and editing the body are fine.
 
-**Follow-up requests.** The orchestrator may message you after you report. The message is one or both of Fix and Rebase (Rebase first when both), or Next PR:
-- **Fix**: the orchestrator's final check and its reviewer found problems, or a human asked for changes on the PR. The message carries each item: for review findings, severity, finding and evidence; for a human's PR feedback, its URL, `path:line` and body.
-- **Rebase**: a sibling PR merged and yours now conflicts.
-- **Next PR**: an earlier PR of this issue merged, and the contract plans another one.
-
-For a Fix or a Rebase:
-1. Put the PR back into draft first (`gh pr ready --undo`). If drafts are unavailable, put the warning line back at the top of the body.
-2. For a rebase, rebase onto the current base; never merge. Resolve each conflict so that both sides survive as their contracts say.
-3. For a fix, fix each point, with a test where one can show it.
-4. Fold each fix into the commit that introduced the problem (step 2 of "Then"). Spawn no reviewer; the orchestrator re-reviews when behaviour changed or a conflict was resolved by meaning.
-5. Rerun the required tests, push with `--force-with-lease`, and update the passing SHA in the PR body.
-6. Report what you changed (for a rebase: the conflicted files, and for each whether you resolved it mechanically or by meaning) and the new SHA. The orchestrator checks again and marks the PR ready.
-
-For a Next PR, start from the current base in the same worktree.
-- If the repo's rules fix one branch name per issue, reset that branch to the current base.
-- Otherwise create a new branch whose name contains `<N>`.
-
-Then implement that PR's part of the contract with the procedure above, from step 1 through "Then", and open it as a draft.
+**Follow-up requests** come by message after you report:
+- **Fix** (review findings or a human's PR feedback, each with evidence), **Rebase** (base moved and your PR conflicts), **Next PR** (an earlier PR of this issue merged).
+- Fix/Rebase: put the PR back to draft (`gh pr ready --undo`) if it is ready; rebase onto `origin/<base>` (never merge), resolving each conflict so both sides survive; fix each item with a test where one can show it; fold fixes into the commit that introduced the problem; rerun the checks; `git push --force-with-lease`; update the PR body; report what changed (for a rebase: each conflicted file, resolved mechanically or by meaning) and the new SHA.
+- Next PR: start from the current `origin/<base>` in the same worktree and implement that PR's part of the contract as above.
+- If you were stopped by a usage limit and told to continue: check whether your background runs finished and reuse their results; rerun only what has none.
 
 ## When to stop and report instead
 
-Stop and report, with the exact passage and the evidence, when:
-- the contract contradicts the code;
-- the contract leaves a decision open;
-- the work would need changes outside the contract's scope.
-
-The orchestrator resolves it and re-dispatches you. Do not file issues yourself. Record found bugs outside the scope in your report, each with a reproduction (command and output); the orchestrator files them.
+Stop and report, with the exact passage and evidence, when the contract contradicts the code, leaves a decision open, or the work needs changes outside its scope. Do not file issues; list out-of-scope bugs with a reproduction (command and output).
 
 ## Report
 
-- PR URL(s) and the tested SHA. Confirm it equals the PR HEAD.
-- Each completion criterion of the contract: met, with how you checked it. A criterion you met only partly is **not met**; leave its checkbox unchecked and say what is missing.
-- Deviations from the contract and why.
-- Follow-ups: out-of-scope bugs found (each with a reproduction), boundary notes for sibling issues.
-- Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run. "none" is fine. Keep scratch scripts outside the worktree (in the session scratchpad). Repo tools outside the contract are changed only through a tool issue the orchestrator files; do not edit them yourself.
+- PR URL(s) and the tested SHA; confirm it equals the PR HEAD.
+- Each completion criterion: met and how you checked it, or **not met** and what is missing (partly met is not met).
+- Deviations from the contract and why. Out-of-scope bugs with reproductions. Boundary notes for sibling issues.
+- Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run, or "none". Keep scratch scripts in `<scratch>`, outside the worktree.
