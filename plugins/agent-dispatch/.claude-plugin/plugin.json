@@ -1,6 +1,6 @@
 {
   "name": "agent-dispatch",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "description": "Advance the frontier of a map issue (or of an issue set given as a condition such as a label or author) to the end: self-grill every startable needs-triage issue with subagents, decide what the evidence settles, ask the human the rest, rewrite each issue as an agent contract, dispatch implement or diagnosing-bugs subagents that open draft PRs, review each PR with an adversarial reviewer plus mechanical checks, and land it right away when it is clean (via the repo's own landing command or gh), then move on until the scope is done. Deterministic steps are shared scripts: frontier query, in-flight check, PR shape check, throwaway worktrees, mutation runs, landing and cleanup.",
   "author": {
     "name": "jemings"
