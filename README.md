@@ -18,6 +18,8 @@ want, each as its own `plugins/<name>/`.
 All eight plugins are fully independent — no shared files, no install ordering,
 no cross-plugin requirements. `agent-dispatch` drives skills from the external
 [mattpocock-skills](https://github.com/mattpocock/skills) plugin (see Prerequisites).
+It does not need pstack: its discipline cards are condensed from pstack (MIT) and
+ship inside the plugin.
 
 ## Prerequisites
 
@@ -42,6 +44,9 @@ no cross-plugin requirements. `agent-dispatch` drives skills from the external
   live session already holds. The repo should have its triage labels
   (`needs-triage`, `ready-for-agent`, `ready-for-human` or their mapped names)
   and a map issue whose sub-issues use GitHub's native blocked-by dependencies.
+  pstack is not required: the five discipline cards in
+  `references/disciplines.md` are condensed from pstack's (MIT) principle skills,
+  each card naming its source.
 
 ## Install
 
@@ -122,7 +127,8 @@ cleaned up on the next marketplace sync instead of failing to load.
 
 ```bash
 bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh   # statusline-kit install script (isolated tmp HOME)
-bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh incl. --where (gh stub that runs host jq, bash:3.2 if docker image exists)
+bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh   # agent-dispatch wait-prs.sh · in-flight.sh incl. --where (gh stub that runs host jq, bash:3.2 if docker image exists), plus static checks of SKILL.md, references/ (briefs, discipline cards)
+bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-tools.sh     # agent-dispatch land.sh · pr-check.sh · temp-tree.sh · mutate.sh · frontier.sh (gh stub, real git, temp bare remote)
 bash scripts/check-ascii.sh plugins/agent-dispatch                              # agent-dispatch must stay ASCII punctuation (exit 1 lists offenders)
 bash scripts/check-quotes.sh plugins/agent-dispatch                             # unbalanced quotes the in-house scanner would misread (exit 1 lists file:line:state)
 bash scripts/test-check-quotes.sh                                               # check-quotes.sh harness (SCANNER_PY=<scanner python> adds a differential run)

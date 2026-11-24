@@ -57,6 +57,10 @@ bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-tools.sh
 bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
 ```
 
+`SKILL.md` 와 `references/` 를 고쳐도 `test-scripts.sh` 를 돌린다. 정적 검사가 SKILL.md 의
+스크립트 호출과 0단계, 지시문의 정책 문장(draft, ready/병합/PR 댓글 금지, 스킬 기본값보다 앞섬),
+pstack 이름과 버전 경로가 없는지, 규율 카드의 칸, 트래커 조회 예시가 본문을 내는지를 본다.
+
 경우 하나를 고쳐 다시 볼 때는 `ONLY='<ERE>'` 로 라벨(`PASS`/`FAIL` 줄의 글)이 맞는
 경우만 돌린다(맞는 것이 없으면 exit 1, ERE 가 올바르지 않으면 exit 2). 리뷰의 변이
 확인은 손으로 사본을 고치지 말고 `MUTATE='in-flight.sh:s/exit 2/exit 1/'
