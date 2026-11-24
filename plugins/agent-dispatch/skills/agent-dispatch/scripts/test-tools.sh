@@ -18,7 +18,7 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 
 # gh 스텁. 상태: $ST/pr_<N>.json, $ST/merge_err, $ST/repo.json, $ST/issue_<N>, $ST/mseq_<N>(mergeable 을 차례로 낸다),
-# $ST/sub_issues.json, $ST/search.json. 받은 호출은 $ST/calls 에 한 줄씩 남는다. $ST/issue_<N> 내용이 FAIL 이면 조회가 exit 1 이다.
+# $ST/sub_issues.json, $ST/search.json, $ST/fail_json_<필드>(pr view --json <필드> 가 exit 1). 받은 호출은 $ST/calls 에 한 줄씩 남는다. $ST/issue_<N> 내용이 FAIL 이면 조회가 exit 1 이다.
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 st=${ST:?}
@@ -30,6 +30,7 @@ setf() { local f=$st/pr_$1.json t; t=$(mktemp); jq "$2" "$f" > "$t" && mv "$t" "
 case "$1 $2" in
   "pr view")
     n=$3; f=$st/pr_$n.json; [ -f "$f" ] || { echo "no PR $n" >&2; exit 1; }
+    [ ! -f "$st/fail_json_$(arg --json "$@")" ] || { echo "gh: could not read $(arg --json "$@")" >&2; exit 1; }
     if [ -s "$st/mseq_$n" ]; then m=$(head -1 "$st/mseq_$n"); sed -i 1d "$st/mseq_$n"; setf "$n" ".mergeable=\"$m\""; fi
     [ ! -f "$st/merge_on_view_$n" ] || setf "$n" '.state="MERGED" | .mergeCommit={"oid":"feedface0000"}'
     emit < "$f" ;;
@@ -194,6 +195,23 @@ t_check_unknown() {
   run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt"; expect_rc 0; expect_has "OK 충돌 없음"
 }
 t_check_args() { setup_repo; run pr-check.sh --repo o/r --pr 7 --worktree "$T/none"; expect_rc 2; }
+t_check_draft_ok() { # --draft: draft PR 이면 OK draft
+  setup_repo; git -C "$T/wt" fetch -q origin
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --draft
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "OK draft"
+}
+t_check_draft_ready() { # --draft: ready 인 PR 은 FAIL draft. --draft 가 없으면 draft 를 보지 않는다
+  setup_repo; git -C "$T/wt" fetch -q origin; pr 7 isDraft=false
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --draft
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL draft: "
+  : > "$ST/calls"; run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt"
+  expect_rc 0; expect_last "SHAPE OK"; expect_not "draft"; expect_not_called "isDraft"
+}
+t_check_draft_unreadable() { # --draft: isDraft 를 읽지 못하면 draft 로 치지 않는다
+  setup_repo; git -C "$T/wt" fetch -q origin; touch "$ST/fail_json_isDraft"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --draft
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL draft: "; expect_has "isDraft=?"; expect_called "--json isDraft"
+}
 # 증거 판정(--verdict, --carry): EVIDENCE OK 나 RERUN 을 내되 fails 에 세지 않는다
 vsetup() { setup_repo; git -C "$T/wt" fetch -q origin; mkdir -p "$T/logs"; }
 vlog() { printf 'run e2e\n%s\n' "$1" > "$T/logs/e2e.log"; }
@@ -402,7 +420,7 @@ t_frontier_body_fail() { fb_run '"선행: #9"' FAIL; expect_rc 1; case $ERR in *
 
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
-check_ok check_fails check_forbid_rename check_unknown check_args
+check_ok check_fails check_forbid_rename check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
 check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
 check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses
