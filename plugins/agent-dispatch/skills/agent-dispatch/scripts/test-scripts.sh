@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # wait-prs.sh, in-flight.sh 의 시험 하네스. 네트워크를 쓰지 않고, gh 는 PATH 의 스텁으로 갈음한다.
+# SKILL.md 와 references/ 의 정적 검사(스크립트 호출, 지시문의 정책 문장, 규율 카드, 조회 예시)도 여기서 돈다.
+# 그래서 SKILL.md, references/ 만 고쳐도 이 하네스를 돌린다.
 #
 # 실행:
 #   bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
@@ -796,6 +798,46 @@ case_where_skill_static() { # SKILL.md: CLAUDE_PLUGIN_ROOT 0건, 호출은 CLAUD
   case $step0 in *'쓰기를 하지 않는다'*) ;; *) bad "0단계에 쓰기 금지 문장이 없다" ;; esac
   case $step0 in *'AskUserQuestion'*) ;; *) bad "0단계에 AskUserQuestion 이 없다" ;; esac
 }
+case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack 이름, 경로 없음, 카드 칸, 접두어 규칙, 조회 예시
+  local dir=$SCRIPTS/.. plug=$SCRIPTS/../../.. sk ib dc f id card field lines hit
+  sk=$dir/SKILL.md ib=$dir/references/implement-brief.md dc=$dir/references/disciplines.md
+  local briefs=("$dir/references/grill-brief.md" "$ib" "$dir/references/review-brief.md")
+  # (a) 구현 지시문의 정책: draft, ready 금지, 병합 금지, PR 댓글 금지, 불러온 스킬의 기본값보다 앞선다
+  for f in '**draft**' 'do not mark the PR ready' 'do not merge' 'Never comment on' 'take precedence over the defaults of any skill you load'; do
+    grep -qF -- "$f" "$ib" || bad "(a) implement-brief 에 '$f' 가 없다"
+  done
+  # (b) 지시문은 pstack 의 스킬, 에이전트, 작업자 문서를 부르지 않는다
+  for f in "${briefs[@]}"; do
+    hit=$(grep -nE 'pstack:|poteto-agent|poteto-mode|worker\.md' "$f" || true)
+    [ -z "$hit" ] || bad "(b) $(basename "$f") 에 pstack 이름이 있다: $hit"
+  done
+  # (c) 규율 카드 다섯 장마다 언제, 규칙, 자리, 출처 칸이 있고 SKILL.md 가 카드 파일을 가리킨다
+  if [ -f "$dc" ]; then
+    for id in laziness foundational boundary root-cause sequence; do
+      card=$(awk -v h="### $id" '$0 == h { f = 1; next } /^##/ { f = 0 } f' "$dc")
+      [ -n "$card" ] || { bad "(c) disciplines.md 에 카드 $id 가 없다"; continue; }
+      for field in 언제 규칙 자리 출처; do
+        case $card in *"**$field**:"*) ;; *) bad "(c) 카드 $id 에 $field 칸이 없다" ;; esac
+      done
+    done
+  else
+    bad "(c) disciplines.md 가 없다: $dc"
+  fi
+  grep -qF 'references/disciplines.md' "$sk" || bad "(c) SKILL.md 가 references/disciplines.md 를 가리키지 않는다"
+  # (d) 플러그인 접두어 규칙
+  grep -qF 'mattpocock-skills:tdd' "$sk" || bad "(d) SKILL.md 에 플러그인 접두어 규칙(mattpocock-skills:tdd)이 없다"
+  # (e) 버전에 묶인 pstack 설치 경로를 박지 않는다
+  hit=$(grep -rnE 'cursor-plugins/pstack/[0-9]' "$plug" || true)
+  [ -z "$hit" ] || bad "(e) pstack 버전 경로가 있다: $hit"
+  # (f) 트래커 조회 예시는 본문을 낸다. --comments 단독은 TTY 가 아니면 본문을 빼고 댓글만 낸다
+  for f in "${briefs[@]}"; do
+    lines=$(grep -F 'gh issue view' "$f" || true)
+    [ -n "$lines" ] || { bad "(f) $(basename "$f") 에 gh issue view 조회 예시가 없다"; continue; }
+    case $lines in *--comments*) bad "(f) $(basename "$f") 의 조회 예시가 --comments 를 쓴다: $lines" ;; esac
+    hit=$(printf '%s\n' "$lines" | grep -vE -- '--json ([a-z]+,)*body(,| )' || true)
+    [ -z "$hit" ] || bad "(f) $(basename "$f") 의 조회 예시가 --json 으로 본문(body)을 받지 않는다: $hit"
+  done
+}
 
 # ---- 정적 검사 ----
 # 길이 확인 없이 펼친 배열("${a[@]}", ${a[*]}, ${a[@]:1})이 없어야 한다. bash 4.3 이하는 set -u 아래 빈 배열 펼침에서 죽는다.
@@ -1075,6 +1117,7 @@ CASES=(
   'in-flight --where: CDPATH 가 걸려도 상대 경로 실행이 PLUGIN:case_where_cdpath'
   'in-flight --where: 인자를 주면 exit 2:case_where_rejects_args'
   'in-flight --where: SKILL.md 정적 검사:case_where_skill_static'
+  '지시문, 규율 카드 정적 검사:case_dispatch_prose_static'
   'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
   'in-flight 7 6 -> 깨진 claim 이 판정을 막지 않는다:case_flight_broken_claim_file'
   'in-flight --claim -> 임시 파일이 남지 않고 새 파일로 바뀐다:case_flight_claim_atomic'
