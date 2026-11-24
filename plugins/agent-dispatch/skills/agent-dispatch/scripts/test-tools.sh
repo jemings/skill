@@ -418,6 +418,15 @@ t_frontier_body_others_skip() {
   RUN_DIR=$T run frontier.sh --repo o/r --map 9; RUN_DIR=''; expect_rc 0; expect_has OTHERS; expect_not_called "issue view"; }
 t_frontier_body_fail() { fb_run '"선행: #9"' FAIL; expect_rc 1; case $ERR in *"frontier: 선행 #9 조회 실패"*) ;; *) bad "stderr: $ERR" ;; esac; }
 
+# CASES 에 적힌 이름의 함수가 없으면(오타, 이름 바꾸기, 지운 함수) 그 경우를 FAIL 로 센다. 이 하네스의 복사본에
+# 없는 이름을 끼워 돌려 본다.
+t_missing_case_fn() {
+  local cp=$ROOT/self.sh
+  sed -e "s|^SCRIPTS=.*|SCRIPTS=$SCRIPTS|" -e "s|^CASES='|CASES='no_such_case |" "${BASH_SOURCE[0]}" > "$cp"
+  OUT=$(ONLY='^no such case$' bash "$cp" 2>&1); RC=$?
+  expect_rc 1; expect_has 'FAIL no such case: t_no_such_case 함수가 없다'; expect_not 'PASS no such case'; expect_has 'pass 0 fail 1'
+}
+
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
 check_ok check_fails check_forbid_rename check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
@@ -426,12 +435,13 @@ check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebase
 check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses
 mut_killed mut_survived mut_baseline_red mut_not_unique mut_literal frontier_map frontier_query
 frontier_body_open frontier_body_closed frontier_body_mid frontier_body_linked frontier_body_union frontier_body_refs frontier_body_repo_case frontier_body_cross_repo frontier_body_prefix
-frontier_body_others_skip frontier_body_fail'
+frontier_body_others_skip frontier_body_fail missing_case_fn'
 ran=0
 for c in $CASES; do
   label=${c//_/ }
   if [ -n "${ONLY:-}" ] && ! printf '%s\n' "$label" | grep -qE -- "$ONLY"; then continue; fi
-  CASE=$label BAD=0 ran=$((ran + 1)); "t_$c"
+  CASE=$label BAD=0 ran=$((ran + 1))
+  if declare -F "t_$c" >/dev/null; then "t_$c"; else bad "t_$c 함수가 없다"; fi
   if [ $BAD = 0 ]; then PASS=$((PASS + 1)); echo "PASS $label"; else FAIL=$((FAIL + 1)); fi
 done
 [ $ran -gt 0 ] || { echo "ONLY='${ONLY:-}' 에 맞는 경우가 없다" >&2; exit 1; }
