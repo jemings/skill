@@ -13,7 +13,7 @@ want, each as its own `plugins/<name>/`.
 | **agent-clinic**     | `agent-clinic`     | Diagnose and treat a repo's context/doc health: trim bloated CLAUDE.md/AGENTS.md, resync public docs with the current code, untrack leaked editor config, and clear out finished planning artifacts. |
 | **agent-update**     | `agent-update`     | Install the latest native release directly, skipping `claude update`'s fixed download deadline that fails on a slow proxy: manifest lookup, resumable checksum-verified download, atomic symlink swap. |
 | **agent-delegation**  | `agent-delegation`  | Delegate a GitHub issue to Claude Code CLI end to end: implement → open PR → adversarial review by the delegating agent → re-delegation loop until every review comment is resolved and independently verified. |
-| **agent-dispatch**    | `agent-dispatch`    | Advance a map issue's frontier (or that of a condition-defined issue set, e.g. by label or author): subagents self-grill every startable `needs-triage` sub-issue → the orchestrator decides what the evidence settles and asks the human only the contested rest (one round) → each issue is rewritten as an agent contract and moved to `ready-for-agent` → implement / diagnosing-bugs subagents open draft PRs → the orchestrator runs an adversarial reviewer in parallel with its final review of every PR (reruns the tests, checks the diff against the contract, reproduces the key claims) and sends one combined fix request → it watches the PRs and, as each one merges, cleans up and moves on to the next frontier until the scope is done, putting defects it files along the way straight into the frontier. A verification step repeated by hand becomes a tool issue for a shared repo tool (extending a similar existing tool first), announced to the other sessions on the same repo (`in-flight.sh --peers`). Each subagent is sized (`model`·`effort`) to the difficulty of its issue, never below `sonnet`·`medium`. |
+| **agent-dispatch**    | `agent-dispatch`    | Advance a map issue's frontier (or that of a condition-defined issue set, e.g. by label or author) to the end: subagents self-grill every startable `needs-triage` issue → the orchestrator decides what the evidence settles and asks the human only the contested rest → each issue is rewritten as an agent contract and moved to `ready-for-agent` → implement / diagnosing-bugs subagents open draft PRs (one issue at a time by default) → the orchestrator reviews each PR with an adversarial reviewer plus its own mechanical checks (PR shape, test reruns in throwaway worktrees, mutation runs) → **when clean it lands the PR itself** (the repo's own landing command or `gh pr merge`, pinned to the reviewed head) and cleans up → next frontier, until the scope is done. Deterministic steps are shared scripts (`frontier.sh`, `in-flight.sh`, `pr-check.sh`, `temp-tree.sh`, `mutate.sh`, `land.sh`, `wait-prs.sh`); purely mechanical subagent work runs on `haiku`·`max`. |
 
 All eight plugins are fully independent — no shared files, no install ordering,
 no cross-plugin requirements. `agent-dispatch` drives skills from the external
@@ -33,10 +33,9 @@ no cross-plugin requirements. `agent-dispatch` drives skills from the external
 - `agent-dispatch` needs `gh` and the **mattpocock-skills** plugin
   (`/plugin install mattpocock-skills@claude-plugins-official`), whose
   `grilling`, `domain-modeling`, `tdd`, and `diagnosing-bugs` skills it hands to
-  its subagents. Merging stays with you: it polls its reviewed PRs, and other
-  sessions' PRs that block the map, with `gh` in a background shell and resumes
-  when one merges, conflicts, closes, or gets new review feedback (a review or
-  conversation comment from a non-bot account) on one of its own PRs. Before
+  its subagents. It merges the PRs it has reviewed as clean itself; when branch
+  protection requires a human approval it marks the PR ready and polls it (and
+  other sessions' PRs that block the map) with `gh` in a background shell. Before
   taking an issue it reads the local Claude Code session records
   (`~/.claude/sessions`, `~/.claude/projects`) with `jq` and skips issues another
   live session already holds. The repo should have its triage labels
