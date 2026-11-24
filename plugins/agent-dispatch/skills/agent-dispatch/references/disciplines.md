@@ -60,7 +60,7 @@ id 와 그 이슈에서의 뜻을 적는다. 6단계에서 카드의 **언제**,
 
 다시 카드로 제안하지 않는다. 이 스킬의 다른 자리가 맡는다.
 
-| pstack 잎 | 맡는 곳 |
+| pstack 의 것 | 맡는 곳 |
 |---|---|
 | `principle-prove-it-works` | 7단계 검수와 PR HEAD 증거(3항 (a)/(b)/(c)). 구현자 자신의 검증은 구현 지시문의 Report 규칙(실행 결과, 판정 줄) |
 | `principle-build-the-lever`, `principle-encode-lessons-in-structure` | "확정적인 일은 스크립트로"와 1단계 "저장소 도구를 공용화한다", 정책을 지키는 시험(`pr-check.sh --draft`, 정적 검사) |
@@ -68,6 +68,7 @@ id 와 그 이슈에서의 뜻을 적는다. 6단계에서 카드의 **언제**,
 | `principle-guard-the-context-window` | 서브에이전트 위임과 상태 블록 |
 | `principle-never-block-on-the-human` | 3단계의 "네가 정한다 / 사람에게 묻는다" 분류 |
 | `principle-attack-the-premise` | 등급 절 "한 칸 올려 다시 보낸다"의 실패한 전제, 구현 지시문의 전제 공격 |
+| `comment-sicko`(약식) | 구현 지시문의 주석 줄과 리뷰 지시문 축 6. 변명 주석은 이름, 추출, 타입, 구조로 고친다. `-h` 정본 머리 주석은 공개 계약 예외 |
 
 ## 쓰지 않는 것
 
@@ -78,7 +79,7 @@ id 와 그 이슈에서의 뜻을 적는다. 6단계에서 카드의 **언제**,
 | `arena`, `swarm` 원형 | 다른 벤더, 클라우드 작업자를 전제하고, 직렬 대기를 늘리고, worktree 규칙 밖이다. 약식은 2단계 두 모양 비교와 실험, 구현자의 읽기 전용 도우미 |
 | `interrogate` | 다른 벤더를 전제하고 적대적 리뷰와 겹친다 |
 | `unslop`, `technical-writing` | 산문 전용이다. PR 본문은 저장소 규칙을 따른다 |
-| `comment-sicko`, `no-comments` | 스크립트 머리 주석이 `-h` 의 정본이다 |
+| `no-comments` | 주석 전부 삭제는 하지 않는다. 스크립트 머리 주석은 `-h` 의 정본이고 공개 계약이다 |
 | poteto-mode 의 shipping, babysit, autopilot | squash 병합을 전제해 `land.sh` 와 부딪힌다 |
 | `show-me-your-work`, `figure-it-out` | 기록은 8단계 착륙 기록에 남긴다 |
 | mattpocock `code-review` 를 더 돌리기 | 리뷰 축과 겹치고 직렬 패스를 늘리며, 이름이 내장 code-review 와 겹친다 |
