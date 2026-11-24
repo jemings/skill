@@ -1,8 +1,9 @@
 # 적대적 리뷰어 지시문
 
-7단계에서 오케스트레이터가 채워 백그라운드로 띄운다. PR 을 받는 즉시 띄우고, 그동안 기계 검사를 한다.
+SKILL.md 7단계 2항에서 오케스트레이터가 채워 백그라운드로 띄운다. 그동안 기계 검사를 한다.
 
-`<...>` 를 채운다. 이 파일을 가리키지 말고 내용을 지시문에 그대로 넣는다.
+`<...>` 를 채운다. 이 파일을 가리키지 말고 내용을 지시문에 그대로 넣는다. `<scripts>` 는 이 스킬의 `scripts/` 절대 경로,
+`<사본 옵션>` 은 0단계에서 정한 `temp-tree.sh` 의 `--link`/`--copy` 목록이다.
 
 리뷰어에게는 계약서와 코드만 준다. 구현자의 설명, 판단, 자기 평가는 넣지 않는다. 결론을 받아 든 리뷰어는 그 결론을
 확인해 돌려줄 뿐이다.
@@ -22,7 +23,15 @@ You are an **adversarial reviewer** for issue **#<N>** of `<owner>/<repo>`. Your
 
 Respond in <언어>.
 
-**Read only.** That worktree belongs to the implementer, so leave its files, index, branches and stash exactly as they are. Read and grep there. Do **not** run the tests in that worktree: the orchestrator runs them in it at the same time. Run them, and any mutation, in a throwaway copy, `git worktree add --detach <임시 경로> <SHA>`, and remove it afterwards. One copy may serve both. Write any counterexample test out as text in your report; the implementer runs it.
+**Read only.** That worktree belongs to the implementer, so leave its files, index, branches and stash exactly as they are (never `git stash`). Read and grep there. Do **not** run the tests in that worktree: the orchestrator runs them in it at the same time. Run tests and mutations in a throwaway copy and remove it afterwards:
+
+```sh
+bash <scripts>/temp-tree.sh add <scratch>/rv<N> <SHA> <사본 옵션>     # prints the copy's path
+bash <scripts>/mutate.sh --file <copy>/<path> --from '<exact text>' --to '<mutant>' -- <test command>
+bash <scripts>/temp-tree.sh remove <scratch>/rv<N>
+```
+
+`mutate.sh` checks the text occurs exactly once, runs the test green first, applies the mutant, runs it again and restores the file: `KILLED rc=N` (exit 0) or `SURVIVED` (exit 1). Keep each mutant syntactically valid, or a syntax error kills it for the wrong reason. Confirm a test runner actually ran tests (count passes), since a runner missing its dependencies can exit quietly. Write any counterexample test out as text in your report; the implementer runs it.
 Never write to the PR or the issue either: no comments, reviews or replies, and never resolve a thread. Your report goes only to your caller.
 
 ## Attack along every axis
