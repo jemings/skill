@@ -411,6 +411,15 @@ t_frontier_body_prefix() { local b
   for b in '"Blocked By: #9"' '"- Blocked by: #9"' '"**선행**: #9"' '"> blocked by: #9"'; do fb_run "$b" OPEN; expect_has "선행 #9(본문)"; done
   fb_run '"선행: 없음"' OPEN; expect_has "READY"; fb_run 'null' OPEN; expect_has "READY"
   fb_run '"선행: #1 #9"' OPEN; expect_has "선행 #9(본문)"; expect_not "#1 #9"; }
+t_frontier_body_none() { local b
+  fb_run '"\u26d4 선행: 없음. #9 보다 먼저 한다."' OPEN; expect_rc 0; expect_has "READY"$'\t'"#1"; expect_not BLOCKED; expect_not_called "issue view"
+  for b in '"Blocked by: none (#9 가 이것을 기다린다)"' '"선행: None, #9 참고"' '"**선행**: 없음 -- #9"' \
+    '"선행:없음 #9"' '"선행:\t없음 #9"' '"선행: **없음** #9"' '"Blocked by: NONE #9"'; do
+    fb_run "$b" OPEN; expect_rc 0; expect_has "READY"$'\t'"#1"; expect_not BLOCKED; expect_not_called "issue view"; done
+  fb_run '"선행: 없음. #9 참고\nBlocked by: x/y#3"' OPEN; expect_rc 0
+  expect_has "선행 x/y#3(본문)"; expect_not "#9"; expect_called "issue view 3 --repo x/y"; expect_not_called "issue view 9"
+  for b in '"선행: 없음표 #9"' '"선행: nonexistent #9"' '"선행: 없음2 #9"' '"선행: none2 #9"'; do
+    fb_run "$b" OPEN; expect_rc 0; expect_has "BLOCKED"$'\t'"#1"$'\t\t'"t"$'\t'"선행 #9(본문)"; done; }
 t_frontier_body_others_skip() {
   T=$(mktemp -d "$ROOT/f.XXXX"); ST=$T/st; mkdir -p "$ST"; export ST
   echo '[{"number":3,"state":"open","title":"theirs","labels":[],"user":{"login":"bob"},"assignees":[],"issue_dependencies_summary":{"blocked_by":0},"body":"선행: #9"},
@@ -434,7 +443,7 @@ check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
 check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses
 mut_killed mut_survived mut_baseline_red mut_not_unique mut_literal frontier_map frontier_query
-frontier_body_open frontier_body_closed frontier_body_mid frontier_body_linked frontier_body_union frontier_body_refs frontier_body_repo_case frontier_body_cross_repo frontier_body_prefix
+frontier_body_open frontier_body_closed frontier_body_mid frontier_body_linked frontier_body_union frontier_body_refs frontier_body_repo_case frontier_body_cross_repo frontier_body_prefix frontier_body_none
 frontier_body_others_skip frontier_body_fail missing_case_fn'
 ran=0
 for c in $CASES; do
