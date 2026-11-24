@@ -250,6 +250,16 @@ t_scanner_differential() {
   [ "$n" -gt 0 ] || fail "대조한 파일이 없다"
 }
 
+# CASES 에 적힌 이름의 함수가 없으면 그 경우를 FAIL 로 센다. 이 하네스의 복사본에 없는 이름을 끼워 돌려 본다.
+t_missing_case_fn() {
+  local cp=$TMP/self.sh
+  sed -e "s|^HERE=.*|HERE=$HERE|" -e "s|^CASES='|CASES='no_such_case |" "${BASH_SOURCE[0]}" > "$cp"
+  OUT=$(ONLY='^no such case$' bash "$cp" 2>&1); RC=$?
+  [ "$RC" = 1 ] || fail "exit $RC, want 1 (out: $OUT)"
+  case $OUT in *'FAIL no such case: t_no_such_case 함수가 없다'*) ;; *) fail "FAIL 줄이 없다: $OUT" ;; esac
+  case $OUT in *'PASS no such case'*) fail "PASS 로 셌다: $OUT" ;; esac
+}
+
 CASES='shape38 shape38_unrolled unterminated_double legit_multiline_single ansi_escaped_quote ansi_open dollar_dq_opens_double
 hash_after_pipe hash_after_dollar_brace hash_comment_quote escape_does_not_cross_lines backslash_continues_quote
 heredoc_odd heredoc_plain crlf no_trailing_newline empty_file reports_start_line
@@ -257,7 +267,7 @@ escape_resets_each_line escape_end_keeps_boundary_off escaped_space_is_not_bound
 bom_stripped binary_skipped dir_ignores_unlisted dir_skips_other_extensions shebang_must_end_at_word
 utf8_validity double_bom shebang_one_line_only only_invalid_ere summary_counts_skip
 dir_walk shebang_forms file_arg_any_name dir_clean two_args no_args missing_path unreadable
-history_aca90b5 history_b225ec5 history_head scanner_differential'
+history_aca90b5 history_b225ec5 history_head scanner_differential missing_case_fn'
 if [ -n "${ONLY:-}" ]; then
   rc=0; printf '' | grep -qE -- "$ONLY" 2>/dev/null || rc=$?
   [ "$rc" != 2 ] || { echo "ONLY='$ONLY' 는 올바른 ERE 가 아니다" >&2; exit 2; }
@@ -266,7 +276,8 @@ ran=0
 for c in $CASES; do
   label=${c//_/ }
   if [ -n "${ONLY:-}" ] && ! printf '%s\n' "$label" | grep -qE -- "$ONLY"; then continue; fi
-  CASE=$label CID=$c BAD=0 SKIPPED=0 ran=$((ran + 1)); "t_$c"
+  CASE=$label CID=$c BAD=0 SKIPPED=0 ran=$((ran + 1))
+  if declare -F "t_$c" >/dev/null; then "t_$c"; else fail "t_$c 함수가 없다"; fi
   if [ $BAD != 0 ]; then :
   elif [ $SKIPPED = 1 ]; then SKIP=$((SKIP + 1))
   else PASS=$((PASS + 1)); echo "PASS $label"; fi
