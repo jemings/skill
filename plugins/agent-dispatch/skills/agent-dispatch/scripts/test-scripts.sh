@@ -811,9 +811,9 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
     hit=$(grep -nE 'pstack:|poteto-agent|poteto-mode|worker\.md' "$f" || true)
     [ -z "$hit" ] || bad "(b) $(basename "$f") 에 pstack 이름이 있다: $hit"
   done
-  # (c) 규율 카드 다섯 장마다 언제, 규칙, 자리, 출처 칸이 있고 SKILL.md 가 카드 파일을 가리킨다
+  # (c) 규율 카드 여섯 장마다 언제, 규칙, 자리, 출처 칸이 있고 SKILL.md 가 카드 파일을 가리킨다
   if [ -f "$dc" ]; then
-    for id in laziness foundational boundary root-cause sequence; do
+    for id in laziness foundational boundary root-cause sequence measure; do
       card=$(awk -v h="### $id" '$0 == h { f = 1; next } /^##/ { f = 0 } f' "$dc")
       [ -n "$card" ] || { bad "(c) disciplines.md 에 카드 $id 가 없다"; continue; }
       for field in 언제 규칙 자리 출처; do
@@ -858,6 +858,33 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   [ -z "$hit" ] || bad "(g) disciplines.md 의 쓰지 않는 것 표에 comment-sicko 가 있다: $hit"
   printf '%s\n' "$sec" | grep -qF '`no-comments`' || bad "(g) disciplines.md 의 쓰지 않는 것 표에 no-comments 행이 없다"
   awk '/^## 이미 있는 것/ { f = 1; next } /^##/ { f = 0 } f' "$dc" | grep -qE '^\| `comment-sicko`' || bad "(g) disciplines.md 의 이미 있는 것 표에 comment-sicko 행이 없다"
+  # (h) 카드 보강: laziness 의 옛 API 삭제, foundational 의 수렴, measure 의 핵심 구절, 이미 있는 것 표의 행 셋
+  local have
+  have=$(awk '/^## 이미 있는 것/ { f = 1; next } /^##/ { f = 0 } f' "$dc")
+  card=$(awk '$0 == "### laziness" { f = 1; next } /^##/ { f = 0 } f' "$dc")
+  for f in '호환 껍데기' '옛 호출자가 남을 때' 'Out-of-scope shapes to reshape' '계약서가 허용할 때만' '공개 계약은 예외' 'principle-migrate-callers-then-delete-legacy-apis'; do
+    case $card in *"$f"*) ;; *) bad "(h) laziness 카드에 '$f' 가 없다" ;; esac
+  done
+  card=$(awk '$0 == "### foundational" { f = 1; next } /^##/ { f = 0 } f' "$dc")
+  for f in '같은 끝 상태' '중단 뒤 이어 하기' 'principle-make-operations-idempotent'; do
+    case $card in *"$f"*) ;; *) bad "(h) foundational 카드에 '$f' 가 없다" ;; esac
+  done
+  card=$(awk '$0 == "### measure" { f = 1; next } /^##/ { f = 0 } f' "$dc")
+  for f in '잡음 바닥' '원인(병목)' '수치에는 실행 횟수, 편차, 병목' '기본 5회는' '어림이면 1회' '로그 경로' '실 데이터로만 닫히는' '다시 돌려 확인한다' '불확실로 낸다' '수치로 대신하지 않는다' 'principle-explain-the-number' 'benchmark-checklist'; do
+    case $card in *"$f"*) ;; *) bad "(h) measure 카드에 '$f' 가 없다" ;; esac
+  done
+  printf '%s\n' "$have" | grep -E '^\| `blast-radius`' | grep -qF '축 5' || bad "(h) blast-radius 행이 축 5 를 가리키지 않는다"
+  grep -qF '카드 여섯 장' "$sk" || bad "(h) SKILL.md 에 '카드 여섯 장' 이 없다"
+  grep -qF '수치 검증' "$sk" || bad "(h) SKILL.md 에 '수치 검증' 이 없다"
+  for f in '8단계' '착륙 기록'; do
+    case $(awk '$0 == "### measure" { f = 1; next } /^##/ { f = 0 } f' "$dc") in *"$f"*) bad "(h) measure 카드에 '$f' 가 있다" ;; esac
+  done
+  case $(awk '$0 == "### foundational" { f = 1; next } /^##/ || /\*\*규칙\*\*/ { f = 0 } f' "$dc") in *'생애 단계'*) bad "(h) foundational 언제 칸에 '생애 단계' 가 있다" ;; esac
+  printf '%s\n' "$have" | grep -E '^\| `principle-exhaust' | grep -qF '약식' || bad "(h) exhaust 행에 '약식' 이 없다"
+  printf '%s\n' "$have" | grep -E '^\| `principle-exhaust' | grep -qF '프로토타입은 짓지 않는다' || bad "(h) exhaust 행에 '프로토타입은 짓지 않는다' 가 없다"
+  for f in 'blast-radius' 'principle-exhaust-the-design-space' 'principle-test-behavior-not-implementation'; do
+    printf '%s\n' "$have" | grep -qE "^\| \`$f\`" || bad "(h) disciplines.md 의 이미 있는 것 표에 $f 행이 없다"
+  done
 }
 
 # ---- 정적 검사 ----
