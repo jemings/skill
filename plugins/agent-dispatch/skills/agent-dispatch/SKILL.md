@@ -60,8 +60,8 @@ description: >-
 - **lifecycle 은 이 스킬이 가진다**: 다른 오케스트레이션 모드나 스킬(예: poteto-mode)과 그 모델 규칙이 같은 세션에
   있어도, 서브에이전트 종류, `model`/`effort`, 지시문, PR 상태는 이 스킬을 따른다. setup-pstack 이 쓰는 pstack 모델
   rules 파일(`pstack-models.md`)은 pstack 역할(feature, bug-fix, arena runners 등)의 설정이라 등급 표에 쓰지 않는다.
-- **규율 카드**: 일하는 방법(가장 작은 변경, 자료 모양 먼저, 경계 검사, 근본 원인, 검사로 끝나는 단위)은
-  [`references/disciplines.md`](references/disciplines.md) 의 카드 다섯 장이다. 2, 5, 6, 7단계가 쓴다.
+- **규율 카드**: 일하는 방법(가장 작은 변경, 자료 모양 먼저, 경계 검사, 근본 원인, 검사로 끝나는 단위, 수치 검증)은
+  [`references/disciplines.md`](references/disciplines.md) 의 카드 여섯 장이다. 2, 5, 6, 7단계가 쓴다.
 
 ## 서브에이전트의 크기 -- model/effort
 
