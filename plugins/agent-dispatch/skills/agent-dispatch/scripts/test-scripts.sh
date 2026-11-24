@@ -937,6 +937,11 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   for f in '<이슈 사이 계기면 남긴다:' 'original fix' 'regression test' 'undo'; do
     case $ax5 in *"$f"*) ;; *) bad "(j) review-brief 축 5 줄에 '$f' 가 없다" ;; esac
   done
+  # (k) 기계 등급은 없다. 가벼움 구현은 haiku/max 다
+  grep -qE '^\| 기계 \|' "$sk" && bad "(k) 등급 표에 기계 행이 남아 있다"
+  grep -qF '기계 등급' "$sk" && bad "(k) SKILL.md 에 '기계 등급' 이 남아 있다"
+  grep -E '^\| 가벼움 \|' "$sk" | grep -qE '\| `haiku`/`max` \|$' || bad "(k) 등급 표 가벼움 행의 구현 열이 haiku/max 가 아니다"
+  grep -qF '**가벼움 구현은 `haiku`/`max` 다.**' "$sk" || bad "(k) 등급 절에 가벼움 구현 항목이 없다"
 }
 
 # ---- 정적 검사 ----
