@@ -55,7 +55,7 @@ case "$1 $2" in
     [ ! -f "$st/merge_err" ] || { cat "$st/merge_err" >&2; exit 1; }
     live "$n"; on_merge "$n"
     want=$(arg --match-head-commit "$@"); head=$(field "$n" headRefOid)
-    [ "$want" = "$head" ] || { echo "Head branch was modified" >&2; exit 1; }
+    [ "$want" = "$head" ] || { echo "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)" >&2; exit 1; }
     if [ -f "$st/live_head" ]; then
       bare update-ref "refs/heads/$(field "$n" baseRefName)" "$head"; setf "$n" ".state=\"MERGED\" | .mergeCommit={\"oid\":\"$head\"}"
     else
@@ -142,6 +142,42 @@ t_land_needs_human() { # 보호 규칙이 승인을 요구하면 exit 3 이고 w
 t_land_merge_fail() { # 그 밖의 병합 실패는 BLOCKED
   setup_repo; echo "something else broke" > "$ST/merge_err"; run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
   expect_rc 1; expect_has "BLOCKED #7 gh pr merge 실패: something else broke"; expect_path "$T/wt"
+}
+t_land_gh_transient() { # 저장소 명령 없이도 base 이동 경합(Base branch was modified)은 같은 HEAD 로 다시 병합한다
+  setup_repo; echo stay > "$ST/on_merge_7"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
+  expect_rc 0; expect_has "LANDED #7"; expect_not "NEEDS_HUMAN"; expect_merges 2
+}
+t_land_gh_transient_limit() { # 다시 하는 횟수는 LAND_ROUNDS 가 정하고, 넘으면 BLOCKED 다
+  setup_repo; printf 'stay\nstay\nstay\n' > "$ST/on_merge_7"
+  LAND_ROUNDS=2 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
+  expect_rc 1; expect_last "BLOCKED #7 base 가 움직여 2번 다시 했다"; expect_merges 2
+  : > "$ST/calls"; printf 'stay\nstay\nstay\nstay\n' > "$ST/on_merge_7"
+  LAND_ROUNDS=3 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
+  expect_rc 1; expect_last "BLOCKED #7 base 가 움직여 3번 다시 했다"; expect_merges 3
+}
+t_land_gh_retry_mergeable() { # 다시 하기 전에 mergeable 을 다시 읽는다
+  setup_repo; printf 'stay\nstay\n' > "$ST/on_merge_7"; printf 'MERGEABLE\nCONFLICTING\n' > "$ST/mseq_7"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
+  expect_rc 1; expect_has "충돌"; expect_merges 1
+  setup_repo; printf 'stay\n' > "$ST/on_merge_7"; printf 'MERGEABLE\nUNKNOWN\nMERGEABLE\n' > "$ST/mseq_7"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
+  expect_rc 0; expect_has "LANDED #7"; expect_merges 2
+}
+t_land_gh_rounds_arg() { # gh 길도 LAND_ROUNDS 를 검증하고 --via 는 검증하지 않는다
+  setup_repo; LAND_ROUNDS=x run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"; expect_rc 2
+  LAND_ROUNDS=0 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"; expect_rc 2
+  LAND_ROUNDS=x run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --via true; expect_rc 1
+}
+t_land_gh_head_modified() { # 병합 직전에 HEAD 가 바뀌었다는 오류는 사람 승인이 아니라 BLOCKED 다
+  setup_repo; echo "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)" > "$ST/merge_err"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
+  expect_rc 1; expect_last "BLOCKED #7 PR HEAD 가 병합 직전에 바뀌었다: GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)"
+}
+t_land_loop_head_modified() { # 고리 길도 같다. PR 브랜치는 검수한 SHA 로 돌아간다
+  loop_setup; echo "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)" > "$ST/merge_err"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_has "BLOCKED #7 PR HEAD 가 병합 직전에 바뀌었다"; expect_pr_branch "$HEAD_SHA"
 }
 t_land_method_squash() { # 저장소가 rebase 를 막았으면 squash
   setup_repo; echo '{"allow_rebase_merge":false,"allow_squash_merge":true}' > "$ST/repo.json"
@@ -726,7 +762,7 @@ t_missing_case_fn() {
   expect_rc 1; expect_has 'FAIL no such case: t_no_such_case 함수가 없다'; expect_not 'PASS no such case'; expect_has 'pass 0 fail 1'
 }
 
-CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
+CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_gh_transient land_gh_transient_limit land_gh_retry_mergeable land_gh_rounds_arg land_gh_head_modified land_loop_head_modified land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
 land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
 land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
