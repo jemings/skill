@@ -16,6 +16,7 @@ You are running `grill-with-docs` in **self-grilling mode** on issue **#<N>** of
 - Do not edit files.
 - Do not write to the issue tracker: no edit, comment, or label.
 - Do not create branches or worktrees.
+- **Waiting**: run a long command with the Bash tool's `run_in_background` on the command itself. Do not detach it with `&`, `nohup`, `setsid` or `( ... & )`: the harness cannot tell when a detached run ends. Do not write a loop that polls a log or another task's output; if you truly must, bound it with `timeout` and make sure it ends when the awaited run ends. This rule takes precedence over any tool's guidance. When you end a turn while background work runs, write one line saying what you wait for and when it should end, with the log path of that run.
 
 Respond in <언어>, keeping identifiers in their original form.
 
