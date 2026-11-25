@@ -116,7 +116,7 @@ bash "${CLAUDE_SKILL_DIR}/scripts/in-flight.sh" --where
 - **착륙**: 규칙이 정한 착륙 명령이 하나로 묶여 있으면 그것(`land.sh --via '<명령>'`), 검사와 병합 전 단계로 나뉘어 있으면
   저장소 명령(`--check '<검사 명령>'`, `--pre-merge '<병합 전 명령>'`, push 에만 줄 env 가 있으면 `--push-env K=V`)으로 준다.
   저장소 명령이 있으면 `land.sh` 가 base 위로 rebase 하고 base 가 움직이면 다시 한다. 둘 다 없으면 gh 병합(저장소가 허용한
-  방식, rebase 우선). 착륙 명령이 PR 본문을 고쳐 쓰는지, draft 를 거부하는지, 커밋 메시지에서 `Closes` 를 모으는지 읽어 둔다.
+  방식, rebase 우선. `Base branch was modified` 로 지면 `LAND_ROUNDS` 번까지 같은 HEAD 로 다시 한다). 착륙 명령이 PR 본문을 고쳐 쓰는지, draft 를 거부하는지, 커밋 메시지에서 `Closes` 를 모으는지 읽어 둔다.
 - **모양 규칙**: 규칙이 막는 커밋 trailer, 브랜치에서 고치면 안 되는 경로(버전, CHANGELOG 등)를 `pr-check.sh` 의
   `--forbid-trailer`/`--forbid-path` 로 옮긴다. **판정 무관 경로**(어떤 시험도 읽지 않는 경로: version 파일, CHANGELOG
   등)를 ERE 목록으로 정한다. 7단계 "걸림"의 재리뷰 예외 (ii) 가 `--may-touch` 로 쓴다. 시험이 읽는 문서(SKILL.md 를 읽는
@@ -363,7 +363,8 @@ worktree, PR 이 생기지 않게 한다.
 | `BLOCKED ... rebase 가 패치를 바꿨다` | Rebase 요청(단계 `rebase`). 돌아오면 7단계(재리뷰가 기본) |
 | `BLOCKED ... 검사 실패: <cmd>` | stderr 의 출력을 읽고 Fix(단계 `수정`). PR 은 draft 로 남아 있다 |
 | `BLOCKED ... 병합 전 명령이 실패했다: <cmd>` | stderr 의 출력을 읽는다. 저장소 쪽 일시 오류면 한 번 더, PR 탓이면 Fix(단계 `수정`) |
-| `BLOCKED ... base 가 움직여 <N>번 다시 했다` | 한 번 더 부른다. 또 그러면 사람에게 넘긴다 |
+| `BLOCKED ... base 가 움직여 <N>번 다시 했다` | 저장소 명령으로 넣을 때도, gh 로 넣을 때도 나온다. 한 번 더 부른다. 또 그러면 사람에게 넘긴다 |
+| `BLOCKED ... PR HEAD 가 병합 직전에 바뀌었다` | 검수 뒤 HEAD 가 바뀌었다(사람 승인이 아니다). 7단계 1항부터 새 HEAD 로 검수한다. 저장소 명령으로 넣었는데 stderr 에 `되돌리지 못했다` 가 있으면, 남이 올린 HEAD 를 덮지 않은 것이다 |
 | `BLOCKED ... PR 브랜치에 push 하지 못했다` | PR HEAD 를 본다. 검수한 SHA 도, stderr 의 `land: 올린 tip` 도 아니면 lease 가 막은 것(검수 뒤 남이 push 했다)이니 `검수한 SHA 와 다르다` 와 같이 한다. 그대로면 원격 오류이니 한 번 더 부르고, 또 그러면 stderr 를 읽고 처리한다 |
 | `BLOCKED ... PR HEAD 가 올린 tip <sha> 이 되지 않았다` | GitHub 반영이 늦었거나 남이 push 했다. 한 번 더 부르고, `검수한 SHA 와 다르다` 가 나오면 그 행대로 한다 |
 | `BLOCKED ... PR 을 읽지 못했다`, `검증 기록을 #<N> 에 남기지 못했다`, `대상 브랜치를 <b> 로 바꾸지 못했다`, `base <b> 를 받지 못했다`, `임시 worktree 를 만들지 못했다`, `임시 디렉터리를 만들지 못했다`, `mergeable 이 끝내 UNKNOWN 이다`, `ready 로 바꾸지 못했다`, `저장소의 병합 방식을 읽지 못했다`, `gh pr merge 실패: <오류>` | 일시 오류이거나 GitHub 반영이 늦을 수 있다. PR 브랜치는 검수한 SHA 다(저장소 명령으로 넣었으면 `land.sh` 가 올린 tip 을 되돌렸다. 되돌리지 못했으면 stderr 에 그렇게 나오고 다음 실행이 `검수한 SHA 와 다르다` 로 멈춘다). 같은 명령으로 한 번 더 부르고, 또 그러면 stderr 와 오류 줄을 읽는다: PR 탓이면 Fix(단계 `수정`)나 Rebase, 네트워크, 디스크, 권한, 저장소 설정처럼 네가 풀 수 없으면 사람에게 넘긴다 |
