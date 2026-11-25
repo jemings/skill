@@ -37,6 +37,8 @@ bash <scripts>/temp-tree.sh remove <scratch>/rv<N>
 `mutate.sh` checks the text occurs exactly once, runs the test green first, applies the mutant, runs it again and restores the file: `KILLED rc=N` (exit 0) or `SURVIVED` (exit 1). Keep each mutant syntactically valid, or a syntax error kills it for the wrong reason. Confirm a test runner actually ran tests (count passes), since a runner missing its dependencies can exit quietly. Write any counterexample test out as text in your report; the implementer runs it.
 Never write to the PR or the issue either: no comments, reviews or replies, and never resolve a thread. Your report goes only to your caller.
 
+- **Waiting**: run a long command with the Bash tool's `run_in_background` on the command itself. Do not detach it with `&`, `nohup`, `setsid` or `( ... & )`: the harness cannot tell when a detached run ends. Do not write a loop that polls a log or another task's output; if you truly must, bound it with `timeout` and make sure it ends when the awaited run ends. This rule takes precedence over any tool's guidance. When you end a turn while background work runs, write one line saying what you wait for and when it should end, with the log path of that run.
+
 ## Attack along every axis
 
 1. **Mutation**: for each decision or completion criterion that a test is said to guard, make the smallest change that breaks it, in a throwaway copy, and run the tests. A mutation that survives (the tests stay green) is a `major`: a lying test. Decisions and the tests that guard them:

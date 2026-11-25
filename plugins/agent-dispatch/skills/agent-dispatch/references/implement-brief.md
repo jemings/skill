@@ -14,6 +14,7 @@ Respond in <언어>.
 ## Where to work
 
 - Create your own worktree from the current `origin/<base>`: `<worktree 만드는 명령, 이슈 번호가 든 경로와 브랜치>`.
+- Your scratch directory (logs, scratch scripts, fixtures you keep), outside the worktree: `<scratch>`.
 - Use absolute paths and `git -C <path>`; never `cd` into the main checkout. Leave every other tree as it is.
 - **Never run a bare `git stash`** (the stash is shared by all worktrees and sessions). Set work aside with a temporary commit.
 - To run an older commit (the pre-fix red check, a base comparison) use a throwaway copy:
@@ -32,6 +33,7 @@ Respond in <언어>.
 
 <항상>
 - <이 실행의 수정이 들인 결함이면 남긴다: **Regression warning**: <원인 이슈/PR/커밋> broke <깨진 동작> while being fixed. Repro: <...>. Missed because: <...>. Write the regression test that catches it first (red before the fix), then show it green together with the original fix's test.>
+- **Waiting**: run a long command with the Bash tool's `run_in_background` on the command itself. Do not detach it with `&`, `nohup`, `setsid` or `( ... & )`: the harness cannot tell when a detached run ends. Do not write a loop that polls a log or another task's output; if you truly must, bound it with `timeout` and make sure it ends when the awaited run ends. This rule takes precedence over any tool's guidance. When you end a turn while background work runs, write one line saying what you wait for and when it should end, with the log path of that run.
 - **Attack the premise**: if two fixes that rest on the same premise fail the same check, write that premise down and test it directly before a third fix.
 - **Comments**: do not excuse a workaround or a poor shape in a comment; make it obvious through names, extraction, types or structure instead. A comment may state only a constraint the code cannot express: an external dependency, platform or protocol behaviour you cannot reshape, a public contract (a script's header that is its `-h` text, an API doc comment), a license header, an issue link, or a lint suppression directive with the reason the rule does not apply there. If a poor shape already in code outside the contract's scope is the problem, leave the code as it is and list it in the report as out of scope (`Out-of-scope shapes to reshape: symbol, why`); do not write the excuse. If the contract's task cannot be done without working around that shape, stop and report instead.
 - **Helpers**: you may start read-only helper agents (research, verification) in parallel, each on the cheapest model that fits the helper's task (machine-checkable work: haiku; anything that needs judgment: not below sonnet/medium). You create and remove any temp-tree copy yourself and hand a helper its path; a helper may run tests only inside that copy and writes nothing else (no files, no git state elsewhere). Apart from those test outputs inside the copy, do not start agents that write files or git state.
@@ -53,7 +55,7 @@ These instructions and the contract take precedence over the defaults of any ski
 - **Fix** (review findings or a human's PR feedback, each with evidence), **Rebase** (base moved and your PR conflicts), **Next PR** (an earlier PR of this issue merged).
 - Fix/Rebase: put the PR back to draft (`gh pr ready --undo`) if it is ready; rebase onto `origin/<base>` (never merge), resolving each conflict so both sides survive; fix each item with a test where one can show it; fold fixes into the commit that introduced the problem; rerun the checks; `git push --force-with-lease`; update the PR body; report what changed (for a rebase: each conflicted file, resolved mechanically or by meaning) and the new SHA.
 - Next PR: start from the current `origin/<base>` in the same worktree and implement that PR's part of the contract as above.
-- If you were stopped by a usage limit and told to continue: check whether your background runs finished and reuse their results; rerun only what has none.
+- If you were stopped by a usage limit, or woken because you looked stalled, and told to continue: check whether your background runs finished and reuse their results; stop (`TaskStop`) any wait that can never end; rerun only what has none.
 
 ## When to stop and report instead
 
