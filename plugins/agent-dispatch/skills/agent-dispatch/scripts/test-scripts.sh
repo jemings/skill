@@ -666,6 +666,419 @@ case_flight_claim_dir_slot() { # 표시 자리가 디렉터리면 --claim 은 �
   [ "$(ls -A "$PCFG/agent-dispatch/claims")" = o_r_5.json ] || bad "claims 에 다른 파일이 생겼다"
 }
 
+# ---- in-flight --agent: 서브에이전트의 정체 판정(흔적: 기록, 기록에 나온 task 출력, --path 아래 파일) ----
+# $PCFG/projects/x/<세션 id>/subagents/agent-<id>.jsonl 이 그 agent 의 기록이다(하네스의 배치). 이슈의 scratch 는 $AS,
+# 하네스의 공용 task 출력 디렉터리는 $AT 다. 낡은 흔적은 touch -t 202601010000 으로 만든다.
+agent_setup() {
+  PCFG=$TMP/cfg AS=$TMP/scratch-65 AT=$TMP/tasks
+  rm -rf "$PCFG" "$AS" "$AT" "$TMP/nogit"; mkdir -p "$PCFG/projects/x/sid1/subagents" "$AS" "$AT" "$TMP/nogit"
+  AGENT_LOG=$PCFG/projects/x/sid1/subagents/agent-a65.jsonl
+}
+# fake_agent_log [<task 출력 경로>...] -- 기록 a65 를 쓴다. 출력 경로마다 하네스가 백그라운드 실행에 다는 문구의 줄을 더한다
+fake_agent_log() {
+  local o
+  printf '{"type":"user","isSidechain":true,"agentId":"a65","message":{"role":"user","content":"go"}}\n' > "$AGENT_LOG"
+  for o; do
+    printf '{"type":"user","isSidechain":true,"agentId":"a65","message":{"role":"user","content":[{"type":"tool_result","content":"Command running in background with ID: b1. Output is being written to: %s. You will be notified when it completes \\u2014 do not poll that file.\\nSession cwd remains /x","is_error":false}]}}\n' "$o" >> "$AGENT_LOG"
+  done
+}
+stale() { touch -t 202601010000 "$@"; }
+age_secs() { perl -e '$t = time - $ARGV[0]; utime $t, $t, @ARGV[1..$#ARGV]' -- "$@"; }   # <초> <파일>... -- mtime 을 그만큼 앞으로
+at_epoch() { perl -e 'utime $ARGV[0], $ARGV[0], @ARGV[1..$#ARGV]' -- "$@"; }   # <epoch> <파일>... -- mtime 을 그 시각으로
+fmt_epoch() { perl -MPOSIX -e 'print strftime("%Y-%m-%d %H:%M", localtime($ARGV[0]))' "$1"; }   # 근거 줄의 시각 꼴
+run_agent() { run_flight_at "$TMP/nogit" --agent "$@"; }
+# run_agent_now <epoch> [인자...] -- PATH 앞의 가짜 date 가 `date +%s` 에 그 epoch 를 낸다(시계를 고정해 경계를 본다)
+run_agent_now() {
+  local now=$1; shift
+  mkdir -p "$TMP/datestub"
+  printf '#!/bin/sh\nif [ "$1" = +%%s ]; then echo %s; else exec %s "$@"; fi\n' "$now" "$(command -v date)" > "$TMP/datestub/date"
+  chmod +x "$TMP/datestub/date"
+  RC=0
+  OUT=$(cd "$TMP/nogit" && PATH="$TMP/datestub:$PATH" CLAUDE_CONFIG_DIR=$PCFG timeout 20 bash "$FLIGHT" --agent "$@" 2>"$TMP/se") || RC=$?
+  ERR=$(cat "$TMP/se")
+}
+first_line() { printf '%s\n' "$OUT" | head -n 1; }
+case_agent_fresh_log() { # 기록이 새것이면 WORKING, 분은 0, 가장 늦은 흔적은 기록. 출력 문구가 없으면 근거 줄로 남긴다
+  agent_setup; fake_agent_log
+  run_agent a65
+  expect_rc 0; expect_err_empty
+  [ "$(first_line)" = "WORKING a65 0 $AGENT_LOG" ] || bad "첫 줄이 'WORKING a65 0 $AGENT_LOG' 가 아니다: '$OUT'"
+  expect_out_has '    출력 파일을 찾지 못했다'
+}
+case_agent_unknown() { # 그 id 의 기록이 없으면 UNKNOWN, exit 0 (다른 agent 의 기록은 보지 않는다)
+  agent_setup; fake_agent_log
+  run_agent b77
+  expect_rc 0
+  [ "$(first_line)" = 'UNKNOWN b77 - -' ] || bad "첫 줄이 'UNKNOWN b77 - -' 가 아니다: '$OUT'"
+}
+case_agent_fresh_output() { # 기록은 낡았어도 기록에 나온 task 출력이 새것이면 WORKING, 가장 늦은 흔적은 그 출력
+  agent_setup
+  stale_out=$AT/bold.output; : > "$stale_out"; : > "$AT/bnew.output"
+  fake_agent_log "$stale_out" "$AT/bnew.output"; stale "$AGENT_LOG" "$stale_out"
+  run_agent a65
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AT/bnew.output" ] || bad "첫 줄이 'WORKING a65 0 $AT/bnew.output' 가 아니다: '$OUT'"
+  expect_out_has "    출력 파일 2개, 가장 늦은 것 "
+  case $OUT in *'출력 파일을 찾지 못했다'*) bad "출력 파일을 찾았는데 못 찾았다고 했다: '$OUT'" ;; esac
+}
+case_agent_fresh_path() { # 기록, 출력은 낡았어도 --path 아래 파일이 새것이면 WORKING
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"
+  mkdir -p "$AS/sub"; : > "$AS/sub/run.log"
+  run_agent a65 --path "$TMP/no-such-wt" --path "$AS"
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AS/sub/run.log" ] || bad "첫 줄이 'WORKING a65 0 $AS/sub/run.log' 가 아니다: '$OUT'"
+  expect_out_has "    경로가 없다: $TMP/no-such-wt"
+}
+case_agent_incident() { # 사고 재연: 흔적이 모두 낡았고 scratch 의 로그를 기다리는 루프가 살아 있다 -> STALLED, 근거 줄에 그 pid
+  agent_setup; : > "$AT/b1.output"; fake_agent_log "$AT/b1.output"
+  : > "$AS/ctl3.log"; mkdir -p "$AS/node_modules/x" "$AS/.git"; : > "$AS/node_modules/x/new.js"; : > "$AS/.git/index"
+  stale "$AGENT_LOG" "$AT/b1.output"; touch -t 202601011200 "$AS/ctl3.log"
+  bash -c 'until grep -q "^never$" "$1"; do sleep 1; done' loop "$AS/ctl3.log" >/dev/null 2>&1 &
+  PEER_PIDS+=("$!"); local loop_pid=$!
+  bash -c 'sleep 60; :' sib "$AS-other/x.log" >/dev/null 2>&1 &
+  PEER_PIDS+=("$!"); local sib_pid=$!
+  run_agent a65 --path "$AS"
+  expect_rc 0
+  case $(first_line) in "STALLED a65 "*" $AS/ctl3.log") ;; *) bad "첫 줄이 'STALLED a65 <분> $AS/ctl3.log' 가 아니다: '$OUT'" ;; esac
+  expect_out_has "    프로세스 $loop_pid "
+  expect_out_has "    가장 늦은 흔적 2026-01-01 12:00 $AS/ctl3.log"
+  case $OUT in *"프로세스 $sib_pid "*) bad "이름이 이어 붙은 형제 경로($AS-other)의 프로세스를 냈다: '$OUT'" ;; esac
+  case $OUT in *in-flight.sh*) bad "감시(in-flight.sh) 자신을 프로세스로 냈다: '$OUT'" ;; esac
+  peers_teardown
+}
+case_agent_incident2() { # 두 번째 사례(#2988): 프로세스 없음, worktree 에 커밋하지 않은 수정, 흔적이 모두 15분 넘게 그대로 -> 기본값으로 STALLED
+  agent_setup; fake_agent_log
+  local wt=$TMP/wt-2988
+  rm -rf "$wt"; mkdir -p "$wt"
+  git -C "$wt" init -q -b main && printf 'a\n' > "$wt/ci.yml" && git -C "$wt" add ci.yml \
+    && git -C "$wt" -c user.name=t -c user.email=t@t commit -q -m 'fix(ci): draft'
+  printf 'b\n' >> "$wt/ci.yml"
+  [ -n "$(git -C "$wt" status --porcelain)" ] || bad "fixture: worktree 에 커밋하지 않은 수정이 없다"
+  age_secs 1200 "$AGENT_LOG"; age_secs 950 "$wt/ci.yml"
+  run_agent a65 --path "$wt" --path "$AS"
+  expect_rc 0
+  [ "$(first_line)" = "STALLED a65 15 $wt/ci.yml" ] || bad "첫 줄이 'STALLED a65 15 $wt/ci.yml' 가 아니다: '$OUT'"
+  case $OUT in *'    프로세스 '*) bad "프로세스가 없는데 프로세스 근거 줄을 냈다: '$OUT'" ;; esac
+  rm -rf "$wt"
+}
+case_agent_foreign_output() { # 기록에 나오지 않은 task 출력(남의 것)만 새것이면 STALLED
+  agent_setup; : > "$AT/mine.output"; fake_agent_log "$AT/mine.output"
+  stale "$AGENT_LOG" "$AT/mine.output"; : > "$AT/theirs.output"
+  run_agent a65
+  expect_rc 0
+  case $(first_line) in "STALLED a65 "*" $AT/mine.output") ;; *) bad "첫 줄이 'STALLED a65 <분> $AT/mine.output' 가 아니다: '$OUT'" ;; esac
+}
+case_agent_idle_boundary() { # --idle-min 은 분이다: 90초 전 흔적은 2분 안(WORKING 1분), 150초 전은 2분 넘음(STALLED 2분)
+  agent_setup; fake_agent_log
+  age_secs 90 "$AGENT_LOG"
+  run_agent a65 --idle-min 2
+  [ "$(first_line)" = "WORKING a65 1 $AGENT_LOG" ] || bad "90초: 첫 줄이 'WORKING a65 1 ...' 가 아니다: '$OUT'"
+  age_secs 150 "$AGENT_LOG"
+  run_agent a65 --idle-min 2
+  [ "$(first_line)" = "STALLED a65 2 $AGENT_LOG" ] || bad "150초: 첫 줄이 'STALLED a65 2 ...' 가 아니다: '$OUT'"
+  age_secs 120 "$AGENT_LOG"
+  run_agent a65 --idle-min 2
+  [ "$(first_line)" = "STALLED a65 2 $AGENT_LOG" ] || bad "꼭 2분(120초): 'STALLED a65 2 ...' 여야 한다: '$OUT'"
+  age_secs 890 "$AGENT_LOG"
+  run_agent a65
+  [ "$(first_line)" = "WORKING a65 14 $AGENT_LOG" ] || bad "기본값 15분: 890초 전은 'WORKING a65 14 ...' 여야 한다: '$OUT'"
+  age_secs 901 "$AGENT_LOG"
+  run_agent a65
+  [ "$(first_line)" = "STALLED a65 15 $AGENT_LOG" ] || bad "기본값 15분: 901초 전은 'STALLED a65 15 ...' 여야 한다: '$OUT'"
+}
+case_agent_wait_stalled() { # --wait: 흔적이 모두 낡았으면 STALLED 를 내고 끝난다(UNKNOWN 도 끝난다)
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"
+  run_agent a65 --wait --interval 1
+  expect_rc 0
+  case $(first_line) in "STALLED a65 "*) ;; *) bad "STALLED 로 끝나야 한다: '$OUT'" ;; esac
+  run_agent zz9 --wait --interval 1
+  expect_rc 0
+  [ "$(first_line)" = 'UNKNOWN zz9 - -' ] || bad "UNKNOWN 으로 끝나야 한다: '$OUT'"
+}
+case_agent_wait_working() { # --wait: 흔적을 계속 갱신하는 프로세스가 있으면 끝나지 않는다(timeout 의 rc 124)
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"; : > "$AS/run.log"
+  bash -c 'while :; do touch "$1"; sleep 1; done' tick "$AS/run.log" >/dev/null 2>&1 &
+  PEER_PIDS+=("$!")
+  RC=0
+  OUT=$(cd "$TMP/nogit" && CLAUDE_CONFIG_DIR=$PCFG timeout 4 bash "$FLIGHT" --agent a65 --path "$AS" --idle-min 1 --wait --interval 1 2>"$TMP/se") || RC=$?
+  expect_rc 124; expect_out_empty
+  peers_teardown
+}
+case_agent_api_error() { # 기록 끝의 마지막 assistant 기록이 API 오류 표식이면 근거 줄. 판정은 바꾸지 않는다
+  agent_setup; fake_agent_log
+  printf '%s\n' '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","content":[{"type":"text","text":"API Error: usage limit reached\nmore"}]}}' \
+    '{"type":"system","subtype":"hook"}' >> "$AGENT_LOG"
+  run_agent a65
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AGENT_LOG" ] || bad "판정이 바뀌었다: '$OUT'"
+  expect_out_has '    API 오류 rate_limit API Error: usage limit reached'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"resumed"}]}}' >> "$AGENT_LOG"
+  run_agent a65
+  case $OUT in *'API 오류'*) bad "오류 뒤에 이어 했는데 API 오류 줄이 남았다: '$OUT'" ;; esac
+}
+case_agent_bad_args() { # 인자 오류는 exit 2: 이슈 번호 꼴의 id, 양의 정수가 아닌 --idle-min/--interval, 다른 모드와 섞기, --agent 없는 감시 옵션
+  agent_setup; fake_agent_log
+  local a
+  for a in '65' '' 'a/b' '--wait' '-x' '--after 0' '--after x' "--after $(( $(date +%s) + 3600 ))" '--after' '--idle-min 0' '--idle-min x' '--idle-min -3' '--interval 0 --wait' '--interval 1.5 --wait' '--interval 5' \
+           '--repo o/r' '--claim' '--release' '--peers' '--where' '7' '--idle-min'; do
+    case $a in ''|65|a/b|--wait|-x) run_flight_at "$TMP/nogit" --agent "$a" ;; *) # shellcheck disable=SC2086
+      run_flight_at "$TMP/nogit" --agent a65 $a ;; esac
+    [ "$RC" = 2 ] || bad "'--agent ... $a' 는 exit 2 여야 하는데 $RC: '$OUT'"
+    [ -z "$OUT" ] || bad "'--agent ... $a' 가 stdout 에 냈다: '$OUT'"
+  done
+  for a in '--path /x' '--idle-min 5' '--wait' '--interval 5' '--after 5'; do
+    # shellcheck disable=SC2086
+    run_flight_at "$TMP/nogit" --peers $a
+    [ "$RC" = 2 ] || bad "--agent 없는 '$a' 는 exit 2 여야 하는데 $RC"
+    case $ERR in *'--agent 와 함께 쓴다'*) ;; *) bad "--agent 없는 '$a' 의 stderr 에 이유가 없다: '$ERR'" ;; esac
+  done
+}
+# run_agent_sleep_stub [인자...] -- PATH 앞의 가짜 sleep 이 받은 인자를 $TMP/slept 에 적고 exit 1 한다(감시는 거기서 끝난다)
+run_agent_sleep_stub() {
+  mkdir -p "$TMP/sleepstub"; rm -f "$TMP/slept"
+  printf '#!/bin/sh\necho "$*" >> "%s"\nexit 1\n' "$TMP/slept" > "$TMP/sleepstub/sleep"; chmod +x "$TMP/sleepstub/sleep"
+  RC=0
+  OUT=$(cd "$TMP/nogit" && PATH="$TMP/sleepstub:$PATH" CLAUDE_CONFIG_DIR=$PCFG timeout 20 bash "$FLIGHT" --agent a65 "$@" 2>"$TMP/se") || RC=$?
+}
+case_agent_wait_default_interval() { # --wait 는 WORKING 이면 --interval 초(기본 60) 잔 뒤 다시 본다
+  agent_setup; fake_agent_log
+  run_agent_sleep_stub --wait
+  [ "$(cat "$TMP/slept" 2>/dev/null)" = 60 ] || bad "기본 간격으로 sleep 60 을 불러야 하는데 '$(cat "$TMP/slept" 2>/dev/null)'"
+  expect_out_empty
+  run_agent_sleep_stub --wait --interval 7
+  [ "$(cat "$TMP/slept" 2>/dev/null)" = 7 ] || bad "--interval 7 이면 sleep 7 이어야 하는데 '$(cat "$TMP/slept" 2>/dev/null)'"
+}
+case_agent_digit_bounds() { # --idle-min, --interval 은 6자리 안의 양의 정수다. 7자리 이상은 bash 산술 오류 없이 exit 2(넘침으로 새 흔적이 STALLED 가 되지 않게)
+  agent_setup; fake_agent_log
+  local a
+  run_agent a65 --idle-min 999999
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AGENT_LOG" ] || bad "--idle-min 999999 는 받아 WORKING 이어야 한다: '$OUT'"
+  run_agent_sleep_stub --wait --interval 999999
+  [ "$(cat "$TMP/slept" 2>/dev/null)" = 999999 ] || bad "--interval 999999 는 받아 sleep 999999 여야 하는데 '$(cat "$TMP/slept" 2>/dev/null)'"
+  for a in '--idle-min 1000000' '--idle-min 153722867280912931' '--interval 1000000 --wait' '--interval 153722867280912931 --wait'; do
+    # shellcheck disable=SC2086
+    run_agent a65 $a
+    [ "$RC" = 2 ] || bad "'$a' 는 exit 2 여야 하는데 $RC: '$OUT'"
+    expect_out_empty
+    case $ERR in *'6자리'*) ;; *) bad "'$a' 의 stderr 에 자릿수 이유가 없다: '$ERR'" ;; esac
+    case $ERR in *'in-flight.sh:'*|*'integer'*|*'정수 표현식'*|*'syntax error'*|*'구문 오류'*|*'value too great'*) bad "'$a' 가 bash 산술 오류를 냈다: '$ERR'" ;; esac
+  done
+}
+case_agent_rearm_after_wake() { # 깨운 뒤 다시 건 감시는 그 시각부터 idle-min 을 기다린다
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"
+  RC=0
+  OUT=$(cd "$TMP/nogit" && CLAUDE_CONFIG_DIR=$PCFG timeout 4 bash "$FLIGHT" --agent a65 --idle-min 1 --wait --interval 1 --after "$(date +%s)" 2>"$TMP/se") || RC=$?
+  expect_rc 124; expect_out_empty
+}
+case_agent_after_old() { # --after 가 가장 늦은 흔적보다 늦으면 나이는 그 시각부터다: 1시간 전이면 STALLED 60분, 흔적 칸은 그대로, 근거 줄에 기준 시각
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"
+  run_agent a65 --after "$(( $(date +%s) - 3600 ))"
+  expect_rc 0
+  [ "$(first_line)" = "STALLED a65 60 $AGENT_LOG" ] || bad "첫 줄이 'STALLED a65 60 $AGENT_LOG' 가 아니다: '$OUT'"
+  expect_out_has '    기준 시각 '
+  run_agent a65 --after 1000000000
+  case $(first_line) in "STALLED a65 60 "*) bad "흔적보다 이른 --after 가 나이를 바꿨다: '$OUT'" ;; "STALLED a65 "*) ;; *) bad "STALLED 여야 한다: '$OUT'" ;; esac
+  case $OUT in *'기준 시각'*) bad "흔적보다 이른 --after 인데 기준 시각 줄을 냈다: '$OUT'" ;; esac
+}
+case_agent_future_mtime() { # 지금보다 미래인 흔적은 판정에서 빼고 근거 줄로만 낸다(나머지 흔적으로 판정)
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"; : > "$AS/clock.log"
+  age_secs -3600 "$AS/clock.log"
+  run_agent a65 --path "$AS"
+  expect_rc 0
+  case $(first_line) in "STALLED a65 "*" $AGENT_LOG") ;; *) bad "첫 줄이 'STALLED a65 <분> $AGENT_LOG' 가 아니다: '$OUT'" ;; esac
+  expect_out_has "    미래 시각 흔적 "
+  expect_out_has "$AS/clock.log"
+}
+case_agent_future_skew() { # 흔적이 모두 몇 초 미래(시계 차이, 다른 파일 시스템)여도 허용 오차 안이면 지금으로 깎는다 -> WORKING 0
+  agent_setup; fake_agent_log; age_secs -3 "$AGENT_LOG"
+  run_agent a65
+  expect_rc 0; expect_err_empty
+  [ "$(first_line)" = "WORKING a65 0 $AGENT_LOG" ] || bad "첫 줄이 'WORKING a65 0 $AGENT_LOG' 가 아니다: '$OUT'"
+  case $OUT in *'미래 시각 흔적'*) bad "허용 오차 안의 흔적을 미래 시각 흔적으로 냈다: '$OUT'" ;; esac
+}
+case_agent_future_all() { # 흔적이 모두 허용 오차보다 미래면 판정할 흔적이 없다 -> UNKNOWN, 근거 줄에 이유와 흔적마다 미래 시각 흔적
+  agent_setup; : > "$AT/b1.output"; fake_agent_log "$AT/b1.output"; : > "$AS/run.log"
+  age_secs -3600 "$AGENT_LOG" "$AT/b1.output" "$AS/run.log"
+  run_agent a65 --path "$AS"
+  expect_rc 0; expect_err_empty
+  [ "$(first_line)" = 'UNKNOWN a65 - -' ] || bad "첫 줄이 'UNKNOWN a65 - -' 가 아니다: '$OUT'"
+  expect_out_has '    판정할 흔적이 없다'
+  printf '%s\n' "$OUT" | grep -qx '    출력 파일 1개' || bad "판정에서 뺀 출력 파일을 가장 늦은 것으로 냈다: '$OUT'"
+  local f
+  for f in "$AGENT_LOG" "$AT/b1.output" "$AS/run.log"; do
+    printf '%s\n' "$OUT" | grep -F '    미래 시각 흔적 ' | grep -qF " $f" || bad "'$f' 의 미래 시각 흔적 줄이 없다: '$OUT'"
+  done
+}
+case_agent_future_tolerance() { # 허용 오차는 300초: 지금+300 의 흔적은 지금으로 깎고(WORKING 0), 지금+301 은 판정에서 빼고 근거 줄로 낸다
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"; : > "$AS/edge.log"
+  local now; now=$(date +%s)
+  at_epoch $(( now + 300 )) "$AS/edge.log"
+  run_agent_now "$now" a65 --path "$AS"
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AS/edge.log" ] || bad "+300초: 첫 줄이 'WORKING a65 0 $AS/edge.log' 가 아니다: '$OUT'"
+  expect_out_has "    가장 늦은 흔적 $(fmt_epoch "$now") $AS/edge.log"
+  case $OUT in *'미래 시각 흔적'*) bad "+300초를 미래 시각 흔적으로 냈다: '$OUT'" ;; esac
+  at_epoch $(( now + 301 )) "$AS/edge.log"
+  run_agent_now "$now" a65 --path "$AS"
+  expect_rc 0
+  case $(first_line) in "STALLED a65 "*" $AGENT_LOG") ;; *) bad "+301초: 첫 줄이 'STALLED a65 <분> $AGENT_LOG' 가 아니다: '$OUT'" ;; esac
+  expect_out_has "    미래 시각 흔적 $(fmt_epoch $(( now + 301 ))) $AS/edge.log"
+}
+case_agent_after_bounds() { # --after: 지금+300 까지는 지금으로 깎고, 그보다 늦으면 exit 2. 12자리를 넘으면 산술 오류 없이 exit 2
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"
+  local now a; now=$(date +%s)
+  run_agent_now "$now" a65 --after $(( now + 300 ))
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AGENT_LOG" ] || bad "--after 지금+300: 첫 줄이 'WORKING a65 0 $AGENT_LOG' 가 아니다: '$OUT'"
+  expect_out_has "    기준 시각 $(fmt_epoch "$now") (--after)"
+  run_agent_now "$now" a65 --after $(( now + 301 ))
+  [ "$RC" = 2 ] || bad "--after 지금+301 은 exit 2 여야 하는데 $RC: '$OUT'"
+  expect_out_empty
+  run_agent_now "$now" a65 --after 999999999999
+  [ "$RC" = 2 ] || bad "--after 999999999999 는 exit 2 여야 하는데 $RC: '$OUT'"
+  case $ERR in *'12자리'*) bad "12자리 --after 를 자릿수로 거부했다: '$ERR'" ;; *'늦다'*) ;; *) bad "12자리 --after 의 stderr 에 늦다는 이유가 없다: '$ERR'" ;; esac
+  for a in 1234567890123 1234567890123456789012345; do
+    run_agent_now "$now" a65 --after "$a"
+    [ "$RC" = 2 ] || bad "--after $a 는 exit 2 여야 하는데 $RC: '$OUT'"
+    case $ERR in *'12자리'*) ;; *) bad "--after $a 의 stderr 에 자릿수 이유가 없다: '$ERR'" ;; esac
+    case $ERR in *'in-flight.sh:'*|*'integer'*|*'정수 표현식'*|*'syntax error'*|*'구문 오류'*|*'value too great'*) bad "--after $a 가 bash 산술 오류를 냈다: '$ERR'" ;; esac
+  done
+}
+# log_entry <type> <epoch> [<밀리초>] -- 기록 a65 에 timestamp(ISO 8601 UTC, 밀리초)를 단 줄을 더한다(하네스의 꼴)
+log_entry() {
+  local ts; ts=$(perl -MPOSIX -e 'print strftime("%Y-%m-%dT%H:%M:%S", gmtime($ARGV[0]))' "$2").${3:-000}Z
+  printf '{"type":"%s","isSidechain":true,"agentId":"a65","timestamp":"%s","message":{"role":"%s","content":[{"type":"text","text":"x"}]}}\n' "$1" "$ts" "$1" >> "$AGENT_LOG"
+}
+case_agent_wake_reply() { # --after 를 주면 근거 줄에 그 뒤 마지막 assistant 기록의 시각, 없으면 응답 없음. 하네스가 남긴 깨움(user)은 응답이 아니다
+  agent_setup; fake_agent_log
+  local w; w=$(( $(date +%s) - 600 ))
+  log_entry assistant $(( w - 3000 )) 120
+  log_entry user "$w" 573
+  run_agent a65 --after "$w"
+  expect_rc 0
+  [ "$(first_line)" = "WORKING a65 0 $AGENT_LOG" ] || bad "깨움 뒤 응답이 판정을 바꿨다: '$OUT'"
+  expect_out_has '    깨움 뒤 응답 없음'
+  log_entry assistant $(( w + 1 )) 250
+  log_entry assistant $(( w + 120 )) 999
+  log_entry user $(( w + 200 ))
+  printf '%s\n' '{"type":"assistant","timestamp":"garbage","message":{"role":"assistant","content":[]}}' \
+    '{"type":"assistant","message":{"role":"assistant","content":[]}}' >> "$AGENT_LOG"
+  run_agent a65 --after "$w"
+  expect_rc 0
+  expect_out_has "    깨움 뒤 응답 $(fmt_epoch $(( w + 120 )))"
+  case $OUT in *'깨움 뒤 응답 없음'*) bad "응답이 있는데 응답 없음이라 했다: '$OUT'" ;; esac
+  run_agent a65
+  case $OUT in *'깨움 뒤 응답'*) bad "--after 없이 깨움 뒤 응답 줄을 냈다: '$OUT'" ;; esac
+}
+case_agent_wake_reply_boundary() { # timestamp 가 --after 와 같은 초면 응답이다(밀리초는 버린다). 한 초 앞(.999)은 아니다
+  agent_setup; fake_agent_log
+  local w; w=$(( $(date +%s) - 600 ))
+  log_entry assistant $(( w - 1 )) 999
+  run_agent a65 --after "$w"
+  expect_out_has '    깨움 뒤 응답 없음'
+  log_entry assistant "$w" 000
+  run_agent a65 --after "$w"
+  expect_out_has "    깨움 뒤 응답 $(fmt_epoch "$w")"
+}
+case_agent_wake_reply_unreadable() { # timestamp 는 줄마다 해석해 못 읽은 줄만 건너뛴다. 응답이 없고 못 읽은 assistant 기록이 있으면 판정 불가(응답 없음이 아니다)
+  agent_setup; fake_agent_log
+  local w bad='{"type":"assistant","timestamp":"2026-13-45T25:61:61Z","message":{"role":"assistant","content":[]}}'
+  w=$(( $(date +%s) - 600 ))
+  log_entry user "$w" 573; printf '%s\n' "$bad" >> "$AGENT_LOG"
+  run_agent a65 --after "$w"
+  expect_out_has '    깨움 뒤 응답 판정 불가(timestamp 를 읽지 못한 assistant 기록 1개)'
+  case $OUT in *'깨움 뒤 응답 없음'*) bad "값이 틀린 timestamp 만 있는데 응답 없음이라 했다: '$OUT'" ;; esac
+  fake_agent_log; log_entry user "$w" 573
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[]}}' >> "$AGENT_LOG"
+  run_agent a65 --after "$w"
+  expect_out_has '    깨움 뒤 응답 판정 불가(timestamp 를 읽지 못한 assistant 기록 1개)'
+  fake_agent_log; log_entry user "$w" 573; log_entry assistant $(( w + 5 )) 100
+  printf '%s\n' "$bad" 5 >> "$AGENT_LOG"
+  run_agent a65 --after "$w"
+  expect_out_has "    깨움 뒤 응답 $(fmt_epoch $(( w + 5 )))"
+  case $OUT in *'판정 불가'*|*'응답 없음'*) bad "깨움 뒤 응답이 있는데 값이 틀린 줄 때문에 응답을 놓쳤다: '$OUT'" ;; esac
+  if [ "$(id -u)" != 0 ]; then
+    chmod 000 "$AGENT_LOG"; run_agent a65 --after "$w"; chmod 644 "$AGENT_LOG"
+    expect_out_has '    깨움 뒤 응답 판정 불가(기록을 읽지 못했다)'
+  fi
+}
+# 정체 감시와 기다림 규칙(#65): SKILL.md 의 감시, 깨우기, scratch, 상태 블록, 세 지시문의 기다림 규칙, watching.md, -h
+case_agent_prose_static() {
+  local dir=$SCRIPTS/.. sk ib f sec w
+  sk=$dir/SKILL.md ib=$dir/references/implement-brief.md
+  sec=$(awk '/^- \*\*서브에이전트의 알림/ { f = 1; print; next } f && /^- \*\*/ { f = 0 } f' "$sk")
+  [ -n "$sec" ] || bad "SKILL.md 에 '서브에이전트의 알림' 항목이 없다"
+  for f in 'in-flight.sh" --agent' '--wait' '`run_in_background`' '감시 <task id>' 'agent 마다 하나' '`TaskStop`' '다시 건다' \
+           '`STALLED`' '`SendMessage` 로 깨운다' '--after <깨움 epoch>' '옛 agent 를 `TaskStop`' '`--after` 없이' '참이 될 수 없는' '다시 돌리지 않는다' '두 번 이어졌다' '같은 등급' '올림 계기가 아니다' \
+           '살아 있는 프로세스' '공용 scratch' '사용 한도'; do
+    case $sec in *"$f"*) ;; *) bad "'서브에이전트의 알림' 항목에 '$f' 가 없다" ;; esac
+  done
+  case $sec in *'기다린다"는 정상이다'*) bad "'서브에이전트의 알림' 항목에 백그라운드 대기가 정상이라는 문장이 남았다" ;; esac
+  w=$(awk '/^  - \*\*감시를 건다\*\*/ { f = 1; print; next } f && /^  - \*\*/ { exit } f' "$sk" | awk '/^ *```/ { c = !c; next } !c' | tr '\n' ' ' | tr -s ' ')
+  case $w in *'알림을 받으면 감시와 함께 같은 명령을 `--wait` 없이 한 번 돌려 그 판정 줄을 보고의 근거로 쓴다'*) ;;
+    *) bad "감시를 건다: 알림을 받으면 --wait 없이 한 번 판정해 보고의 근거로 쓴다는 문장이 없다" ;; esac
+  case $w in *'흔적이 모두 15분(`--idle-min`) 넘게'*) ;; *) bad "감시를 건다: 기본 판정 기준 15분이 없다" ;; esac
+  case $w in *'`판정할 흔적이 없다` 면 감시를 다시 걸지 않고 진행 목록에 `감시 없음(판정할 흔적 없음)` 으로 적는다'*) ;;
+    *) bad "감시를 건다: 판정할 흔적이 없으면 감시를 다시 걸지 않고 '감시 없음(판정할 흔적 없음)' 으로 적는 문장이 없다" ;; esac
+  case $w in *'다음 알림과 보고 때마다 `--wait` 없이 한 번 판정해 판정이 나오면 그때 다시 건다'*) ;;
+    *) bad "감시를 건다: 판정할 흔적이 없을 때 다음 알림과 보고마다 한 번 판정해 다시 거는 문장이 없다" ;; esac
+  # 깨운다: 코드 블록을 뺀 글에서 번호 차례와 그 안의 bullet 을 한 줄씩(줄바꿈은 이어 붙인다) 보고 차례와 조건을 확인한다
+  w=$(awk '/^  - \*\*깨운다\*\*/ { f = 1; print; next } f && /^  - \*\*/ { exit } f' "$sk" | awk '/^ *```/ { c = !c; next } !c' \
+      | awk '/^    [0-9]+\. |^       - / { if (s != "") print s; s = $0; next } s != "" { sub(/^ +/, " "); s = s $0 } END { if (s != "") print s }')
+  local d m r
+  d=$(printf '%s\n' "$w" | grep -n -F '`date +%s`' | head -n 1 | cut -d: -f1)
+  m=$(printf '%s\n' "$w" | grep -n -F '`SendMessage` 로 깨운다' | head -n 1 | cut -d: -f1)
+  r=$(printf '%s\n' "$w" | grep -n -F '`--after <깨움 epoch>` 로 다시 건다' | head -n 1 | cut -d: -f1)
+  if [ -n "$d" ] && [ -n "$m" ] && [ "$d" -lt "$m" ]; then
+    f=$(printf '%s\n' "$w" | sed -n "${d}p")
+    case $f in *'직전'*'`date +%s`'*'`깨움 <epoch>`'*) ;; *) bad "깨운다: SendMessage 직전에 date +%s 로 재어 '깨움 <epoch>' 으로 적는 차례가 아니다: '$f'" ;; esac
+  else bad "깨운다: date +%s 로 깨움 시각을 재는 차례가 '\`SendMessage\` 로 깨운다' 앞에 없다"; fi
+  [ -n "$r" ] && [ -n "$m" ] && [ "$r" -gt "$m" ] || bad "깨운다: 깨운 뒤 '\`--after <깨움 epoch>\` 로 다시 건다' 는 글(코드 블록 밖)이 없다"
+  f=$(printf '%s\n' "$w" | grep -F '`깨움 뒤 응답 없음` 이면' || true)
+  case $f in *'옛 agent 를 `TaskStop`'*'**같은 등급**'*) ;; *) bad "깨운다: '깨움 뒤 응답 없음' 이면 옛 agent 를 TaskStop 하고 같은 등급으로 새로 띄우는 줄이 없다: '$f'" ;; esac
+  f=$(printf '%s\n' "$w" | grep -F '`깨움 뒤 응답 <시각>` 이면' || true)
+  case $f in *'다시 깨운다'*'상한 없음'*) ;; *) bad "깨운다: '깨움 뒤 응답 <시각>' 이면 상한 없이 다시 깨우는 줄이 없다: '$f'" ;; esac
+  f=$(printf '%s\n' "$w" | grep -F '`깨움 뒤 응답 판정 불가(...)` 이면' || true)
+  case $f in *'`TaskStop` 하지 않고'*'다시 깨운다'*) ;; *) bad "깨운다: '깨움 뒤 응답 판정 불가' 이면 TaskStop 하지 않고 다시 깨우는 줄이 없다: '$f'" ;; esac
+  case $w in *'시각보다 앞이면'*|*'시각보다 뒤면'*) bad "깨운다: 흔적 시각으로 반응을 가르는 옛 기준이 남았다" ;; esac
+  grep -E '^\| `in-flight\.sh` \|' "$sk" | grep -F -- '--agent' | grep -qE '\| [0-9, ]*6, 7 \|$' || bad "스크립트 표의 in-flight.sh 행에 --agent 와 단계 6, 7 이 없다"
+  awk '/^\*\*기다림에는 깨울 사건이 있어야 한다\*\*/ { f = 1 } f && /^$/ { exit } f' "$sk" | grep -qF 'in-flight.sh --agent --wait' || bad "'기다림에는 깨울 사건' 문단에 감시가 없다"
+  w=$(awk '/^## 6\./ { f = 1; next } /^## 7\./ { f = 0 } f' "$sk")
+  for f in '<세션 scratchpad>/<N>' '`<scratch>`' '`scratch <경로>`'; do
+    case $w in *"$f"*) ;; *) bad "6단계에 '$f' 가 없다" ;; esac
+  done
+  w=$(awk '/^   - \(a\) \*\*재실행\*\*/ { f = 1; print; next } f && /^   - \(b\)/ { f = 0 } f' "$sk")
+  for f in '`run_in_background`' '`( ... & )`' '`timeout`' '`**Waiting**`' '그 실행의 로그 경로'; do
+    case $w in *"$f"*) ;; *) bad "7단계 3항 (a) 에 '$f' 가 없다" ;; esac
+  done
+  awk '/^## 9\./ { f = 1; next } f' "$sk" | grep -F '일하는 중' | grep -qF -- '--agent' || bad "9단계에 '일하는 중' 의 --agent 판정 근거가 없다"
+  w=$(awk '/^\*\*상태 블록\*\*/ { f = 1 } f && /^진행 목록:/ { g = 1 } g && /^```$/ { exit } g' "$sk")
+  for f in '#<x> grilling, agent <id>, 감시 <task id|없음>[, 깨움 <epoch>]' 'scratch <경로>, 감시 <task id|없음>[, 깨움 <epoch>]'; do
+    case $w in *"$f"*) ;; *) bad "상태 블록 진행 목록에 '$f' 가 없다" ;; esac
+  done
+  for f in "$dir/references/grill-brief.md" "$ib" "$dir/references/review-brief.md"; do
+    w=$(grep -F -- '- **Waiting**:' "$f" || true)
+    [ -n "$w" ] || { bad "$(basename "$f") 에 Waiting 줄이 없다"; continue; }
+    for sec in '`run_in_background` on the command itself' '`( ... & )`' 'polls a log' 'bound it with `timeout`' \
+               'ends when the awaited run ends' 'takes precedence over any tool' 'what you wait for and when it should end, with the log path of that run'; do
+      case $w in *"$sec"*) ;; *) bad "$(basename "$f") 의 Waiting 줄에 '$sec' 가 없다" ;; esac
+    done
+  done
+  grep -F 'and told to continue' "$ib" | grep -qF 'woken because you looked stalled' || bad "implement-brief 의 이어 하기 줄에 정체로 깨웠을 때가 없다"
+  grep -F 'Your scratch directory' "$ib" | grep -qF '`<scratch>`' || bad "implement-brief 에 <scratch> 를 정하는 줄이 없다"
+  grep -F '감시' "$dir/references/watching.md" | grep -F 'wait-prs.sh' | grep -qF '따로 센다' || bad "watching.md 에 감시는 따로 센다는 줄이 없다"
+  w=$(awk '/^# ---- --agent/ { f = 1 } /^# --where:/ { f = 0 } f' "$FLIGHT")
+  [ -n "$w" ] || bad "in-flight.sh 에 --agent 절이 없다"
+  for f in '/proc' '-printf' 'date -d' 'date -r' 'readlink -f'; do
+    case $w in *"$f"*) bad "in-flight.sh 의 --agent 절이 이식되지 않는 '$f' 를 쓴다" ;; esac
+  done
+  run_script native "$FLIGHT" -h
+  for f in 'in-flight.sh --agent <id> [--path <p>]... [--idle-min N] [--after T] [--wait [--interval S]]' '기준 시각' '미래 시각 흔적' '허용 오차는 300초' '깨움 뒤 응답 없음' '12자리' '6자리 안의 양의 정수가 아닌 --idle-min, --interval' '깨움 뒤 응답 판정 불가(<이유>)' '`subagents/` 바로 아래 기록만 본다' 'WORKING' 'STALLED' 'UNKNOWN' 'Output is being written to:'; do
+    expect_out_has "$f"
+  done
+}
+
 # ---- in-flight --where: 실행 위치(플러그인인가, 낡은 사본인가) ----
 # where_setup -- $WH 아래에 가짜 설정 디렉터리, 설치된 플러그인(inst), 사본(copy)을 둔다. 스크립트는 $FLIGHT(변이 사본일 수 있다)를 복사해 쓴다.
 # 플러그인 SKILL.md 는 "plug", 사본은 "old" 로 다르게 둔다. installed_plugins.json 은 inst 를 가리킨다.
@@ -1256,6 +1669,31 @@ CASES=(
   'in-flight --peers: 세션 파일 procStart 가 빈 문자열:case_peers_empty_procstart_session'
   'in-flight --peers: 세션 파일 procStart 가 null:case_peers_null_procstart_session'
   'in-flight 5 를 git 밖에서 -> 이유와 exit 2:case_flight_outside_git'
+  'in-flight --agent: 기록이 새것 -> WORKING:case_agent_fresh_log'
+  'in-flight --agent: 없는 id -> UNKNOWN:case_agent_unknown'
+  'in-flight --agent: 기록에 나온 task 출력이 새것 -> WORKING:case_agent_fresh_output'
+  'in-flight --agent: --path 아래 파일이 새것 -> WORKING:case_agent_fresh_path'
+  'in-flight --agent: 사고 재연(흔적 모두 낡음, 루프 생존) -> STALLED:case_agent_incident'
+  'in-flight --agent: 두 번째 사례(프로세스 없음, 커밋 안 한 수정, 흔적 15분 넘게 그대로) -> STALLED:case_agent_incident2'
+  'in-flight --agent: 남의 task 출력만 새것 -> STALLED:case_agent_foreign_output'
+  'in-flight --agent: --idle-min 경계와 기본값:case_agent_idle_boundary'
+  'in-flight --agent --wait: 정체, 기록 없음이면 끝난다:case_agent_wait_stalled'
+  'in-flight --agent --wait: 흔적이 바뀌는 동안은 끝나지 않는다:case_agent_wait_working'
+  'in-flight --agent --wait: 기본 간격은 60초:case_agent_wait_default_interval'
+  'in-flight --agent --wait --after: 깨운 뒤 다시 건 감시는 그 시각부터 기다린다:case_agent_rearm_after_wake'
+  'in-flight --agent --after: 흔적보다 늦으면 그 시각부터 센다:case_agent_after_old'
+  'in-flight --agent: 미래 시각 흔적은 판정에서 뺀다:case_agent_future_mtime'
+  'in-flight --agent: 흔적이 모두 몇 초 미래면 지금으로 깎는다 -> WORKING:case_agent_future_skew'
+  'in-flight --agent: 흔적이 모두 먼 미래면 UNKNOWN:case_agent_future_all'
+  'in-flight --agent: 미래 시각 허용 오차 300초의 경계:case_agent_future_tolerance'
+  'in-flight --agent --after: 허용 오차 안은 지금으로 깎고 넘으면 exit 2:case_agent_after_bounds'
+  'in-flight --agent --after: 깨움 뒤 assistant 응답을 근거 줄로:case_agent_wake_reply'
+  'in-flight --agent --after: 깨움 뒤 응답의 초 경계:case_agent_wake_reply_boundary'
+  'in-flight --agent --after: 못 읽은 timestamp 는 그 줄만 건너뛰고 판정 불가를 낸다:case_agent_wake_reply_unreadable'
+  'in-flight --agent: 기록 끝의 API 오류 -> 근거 줄:case_agent_api_error'
+  'in-flight --agent: 인자 오류 -> exit 2:case_agent_bad_args'
+  'in-flight --agent: --idle-min, --interval 은 6자리까지:case_agent_digit_bounds'
+  'in-flight --agent: 감시, 기다림 규칙 정적 검사:case_agent_prose_static'
   'in-flight --where: installPath 안이면 PLUGIN:case_where_plugin'
   'in-flight --where: 다른 SKILL.md 의 사본은 STALE:case_where_stale'
   'in-flight --where: 같은 SKILL.md 의 사본은 SAME:case_where_same'
