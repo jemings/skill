@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wait-prs.sh, in-flight.sh 의 시험 하네스. 네트워크를 쓰지 않고, gh 는 PATH 의 스텁으로 갈음한다.
-# SKILL.md 와 references/ 의 정적 검사(스크립트 호출, 지시문의 정책 문장, 규율 카드, 조회 예시)도 여기서 돈다.
+# SKILL.md 와 references/ 의 정적 검사(스크립트 호출, 지시문의 정책 문장, 규율 카드, 조회 예시, land.sh 판정 줄의 8단계 행)도 여기서 돈다.
 # 그래서 SKILL.md, references/ 만 고쳐도 이 하네스를 돌린다.
 #
 # 실행:
@@ -959,7 +959,7 @@ find_unguarded() {
 }
 case_static_empty_array() {
   local f line a ok
-  for f in "$WAIT" "$FLIGHT"; do
+  for f in "$WAIT" "$FLIGHT" "$SCRIPTS/land.sh"; do
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       ok=0
@@ -978,6 +978,45 @@ case_static_detects() { # 검사 자체의 시험: 실제 검사(find_unguarded)
   printf '%s\n' 'x=(${a[@]+"${a[@]}"})' 'echo ${#a[@]} ${!a[@]} ${b[*]+${b[*]}}' '# "${c[@]}"' > "$t"
   r=$(find_unguarded "$t" | wc -l)
   [ "$r" = 0 ] || bad "안전한 꼴을 놓아줘야 하는데 $r 줄을 잡았다"
+}
+
+# land.sh 의 BLOCKED 줄(이유)마다 SKILL.md 8단계 결과 표에 다음 행동을 적은 행이 있다. 이유를 변수와 괄호에서 끊은 조각 가운데
+# 10바이트 이상인 것이 모두 한 행의 결과 칸(첫 칸)에 글자 그대로 있어야 한다.
+blocked_keys() { # <이유> -> 조각(한 줄에 하나)
+  printf '%s\n' "$1" | LC_ALL=C awk '{
+    gsub(/\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|[()]/, "\n"); n = split($0, seg, "\n")
+    for (i = 1; i <= n; i++) { s = seg[i]; sub(/^[ :,]+/, "", s); sub(/[ :,]+$/, "", s); if (length(s) >= 10) print s }
+  }'
+}
+result_cells() { # <SKILL.md> -> BLOCKED, NEEDS_HUMAN 행의 결과 칸(한 줄에 하나)
+  grep -E '^\| `(BLOCKED|NEEDS_HUMAN) ' "$1" | awk '{ s = substr($0, 3); print substr(s, 1, index(s, " | ") - 1) }'
+}
+row_has_all() { # <결과 칸> <조각들>
+  local k
+  while IFS= read -r k; do case $1 in *"$k"*) ;; *) return 1 ;; esac; done <<<"$2"
+}
+case_land_blocked_rows() {
+  local sk=$SCRIPTS/../SKILL.md rows row reason keys found n=0
+  rows=$(result_cells "$sk")
+  [ -n "$rows" ] || { bad "SKILL.md 에 8단계 결과 표의 BLOCKED 행이 없다"; return; }
+  while IFS= read -r reason; do
+    n=$((n + 1)); keys=$(blocked_keys "$reason"); found=0
+    [ -n "$keys" ] || { bad "'$reason' 에 10바이트 이상인 조각이 없다"; continue; }
+    while IFS= read -r row; do row_has_all "$row" "$keys" && { found=1; break; }; done <<<"$rows"
+    [ $found = 1 ] || bad "land.sh 의 'BLOCKED #P $reason' 에 맞는 8단계 표 행이 없다(조각: $(printf '%s' "$keys" | tr '\n' '|'))"
+  done < <(grep -oE 'BLOCKED #\$pr [^"]*' "$SCRIPTS/land.sh" | sed 's/^BLOCKED #\$pr //' | sort -u)
+  [ "$n" -ge 20 ] || bad "land.sh 의 BLOCKED 줄을 $n 개만 읽었다"
+}
+case_land_blocked_key() { # 검사 자체의 시험: 변수, 괄호, 끝의 콜론에서 끊고 짧은 조각은 버린다
+  local r
+  r=$(blocked_keys 'base $tbase 를 받지 못했다'); [ "$r" = '를 받지 못했다' ] || bad "조각: '$r'"
+  r=$(blocked_keys 'PR HEAD 가 올린 tip ${tip:0:12} 이 되지 않았다(${seen% *})' | tr '\n' '|'); [ "$r" = 'PR HEAD 가 올린 tip|이 되지 않았다|' ] || bad "조각: '$r'"
+  r=$(blocked_keys 'PR HEAD 가 검수한 SHA 와 다르다(HEAD ${head:0:12}, 검수 $sha)'); [ "$r" = 'PR HEAD 가 검수한 SHA 와 다르다' ] || bad "조각: '$r'"
+  r=$(blocked_keys '검사 실패: $check'); [ "$r" = '검사 실패' ] || bad "조각: '$r'"
+  row_has_all '| `ready 로 바꾸지 못했다` |' "$(blocked_keys '대상 브랜치를 $base 로 바꾸지 못했다')" && bad "다른 행의 조각 하나에 맞았다"
+  printf '%s\n' '| `BLOCKED ... 착륙 명령이 실패했다` | 저장소 검사 실패면 Fix |' > "$TMP/table.md"
+  r=$(result_cells "$TMP/table.md"); [ "$r" = '`BLOCKED ... 착륙 명령이 실패했다`' ] || bad "결과 칸: '$r'"
+  row_has_all "$r" "$(blocked_keys '검사 실패: $check')" && bad "행동 칸 글자에 맞았다"
 }
 
 # 헤더 구조 시험: 헤더 한가운데(`필요한 것` 줄 바로 앞)에 줄을 끼운 사본으로 -h 를 돌린다. 기대 줄은 여기서 직접 정한다.
@@ -1243,6 +1282,8 @@ CASES=(
   'in-flight --claim -> 표시 자리가 디렉터리면 실패하고 아무것도 더하지 않는다:case_flight_claim_dir_slot'
   '정적 검사: 빈 배열 펼침 없음:case_static_empty_array'
   '정적 검사: 검사기 자체:case_static_detects'
+  '정적 검사: land.sh 의 BLOCKED 줄마다 8단계 표 행:case_land_blocked_rows'
+  '정적 검사: BLOCKED 조각 고르기:case_land_blocked_key'
   'wait-prs -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_wait'
   'in-flight -h -> 헤더 중간에 낀 주석 줄도 낸다:case_hdr_comment_flight'
   'wait-prs -h -> 헤더 중간의 빈 줄에서 끊긴다:case_hdr_blank_wait'

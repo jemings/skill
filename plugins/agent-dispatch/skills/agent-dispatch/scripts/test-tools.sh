@@ -19,6 +19,9 @@ git config --global advice.detachedHead false
 
 # gh 스텁. 상태: $ST/pr_<N>.json, $ST/merge_err, $ST/repo.json, $ST/issue_<N>, $ST/mseq_<N>(mergeable 을 차례로 낸다),
 # $ST/sub_issues.json, $ST/search.json, $ST/fail_json_<필드>(pr view --json <필드> 가 exit 1). 받은 호출은 $ST/calls 에 한 줄씩 남는다. $ST/issue_<N> 내용이 FAIL 이면 조회가 exit 1 이다.
+# opt-in: $ST/live_head(내용은 bare 원격 경로)가 있으면 headRefOid 를 그 원격의 head 브랜치에서 읽고, 병합은 base 를 그 HEAD 로
+# 앞당긴다. $ST/on_merge_<N> 은 병합 호출마다 한 줄 "<move|stay> [gh 오류]" 를 꺼내 move 면 base 에 빈 커밋을 올리고, 그 오류
+# (없으면 "Base branch was modified")로 exit 1. $ST/merge_hook 이 있으면 병합 호출의 맨 앞에서 sh 로 돌린다.
 cat > "$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 st=${ST:?}
@@ -27,19 +30,37 @@ arg() { local k=$1; shift; while [ $# -gt 0 ]; do [ "$1" = "$k" ] && { echo "$2"
 jqf=$(arg --jq "$@")
 emit() { if [ -n "$jqf" ]; then jq -r "$jqf"; else cat; fi; }
 setf() { local f=$st/pr_$1.json t; t=$(mktemp); jq "$2" "$f" > "$t" && mv "$t" "$f"; }
+field() { jq -r ".$2" "$st/pr_$1.json"; }
+bare() { git --git-dir="$(cat "$st/live_head")" "$@"; }
+live() { [ ! -f "$st/live_head" ] || setf "$1" ".headRefOid=\"$(bare rev-parse "refs/heads/$(field "$1" headRefName)")\""; }
+on_merge() {
+  local f=$st/on_merge_$1 ev msg b old
+  [ -s "$f" ] || return 0
+  ev=$(head -1 "$f"); sed -i 1d "$f"; b=refs/heads/$(field "$1" baseRefName)
+  msg=${ev#* }; [ "$msg" != "$ev" ] || msg="GraphQL: Base branch was modified. Review and try the merge again. (mergePullRequest)"
+  if [ "${ev%% *}" = move ]; then old=$(bare rev-parse "$b"); bare update-ref "$b" "$(bare commit-tree "$old^{tree}" -p "$old" -m moved)"; fi
+  echo "$msg" >&2; exit 1
+}
 case "$1 $2" in
   "pr view")
     n=$3; f=$st/pr_$n.json; [ -f "$f" ] || { echo "no PR $n" >&2; exit 1; }
     [ ! -f "$st/fail_json_$(arg --json "$@")" ] || { echo "gh: could not read $(arg --json "$@")" >&2; exit 1; }
+    live "$n"
     if [ -s "$st/mseq_$n" ]; then m=$(head -1 "$st/mseq_$n"); sed -i 1d "$st/mseq_$n"; setf "$n" ".mergeable=\"$m\""; fi
     [ ! -f "$st/merge_on_view_$n" ] || setf "$n" '.state="MERGED" | .mergeCommit={"oid":"feedface0000"}'
     emit < "$f" ;;
   "pr ready") setf "$3" '.isDraft=false' ;;
   "pr merge")
-    n=$3; [ ! -f "$st/merge_err" ] || { cat "$st/merge_err" >&2; exit 1; }
-    want=$(arg --match-head-commit "$@"); head=$(jq -r .headRefOid "$st/pr_$n.json")
+    n=$3; [ ! -f "$st/merge_hook" ] || sh "$st/merge_hook"
+    [ ! -f "$st/merge_err" ] || { cat "$st/merge_err" >&2; exit 1; }
+    live "$n"; on_merge "$n"
+    want=$(arg --match-head-commit "$@"); head=$(field "$n" headRefOid)
     [ "$want" = "$head" ] || { echo "Head branch was modified" >&2; exit 1; }
-    setf "$n" '.state="MERGED" | .mergeCommit={"oid":"cafebabe1234"}' ;;
+    if [ -f "$st/live_head" ]; then
+      bare update-ref "refs/heads/$(field "$n" baseRefName)" "$head"; setf "$n" ".state=\"MERGED\" | .mergeCommit={\"oid\":\"$head\"}"
+    else
+      setf "$n" '.state="MERGED" | .mergeCommit={"oid":"cafebabe1234"}'
+    fi ;;
   "pr close") setf "$3" '.state="CLOSED"' ;;
   "issue comment") cp "$(arg --body-file "$@")" "$st/comment_$3" ;;
   "issue view")
@@ -103,7 +124,7 @@ t_land_gh() { # draft 를 ready 로 바꾸고, 리뷰한 HEAD 로 rebase 병합�
 }
 t_land_head_moved() { # 리뷰 뒤 HEAD 가 바뀌면 넣지도 지우지도 않는다
   setup_repo; run land.sh --repo o/r --pr 7 --sha 0123456789
-  expect_rc 1; expect_has "BLOCKED #7 PR HEAD 가 리뷰한 SHA 와 다르다"; expect_not_called "pr merge"; expect_not_called "pr ready"; expect_path "$T/wt"
+  expect_rc 1; expect_has "BLOCKED #7 PR HEAD 가 검수한 SHA 와 다르다"; expect_not_called "pr merge"; expect_not_called "pr ready"; expect_path "$T/wt"
 }
 t_land_conflict() {
   setup_repo; pr 7 mergeable=CONFLICTING; run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"
@@ -427,6 +448,275 @@ t_frontier_body_others_skip() {
   RUN_DIR=$T run frontier.sh --repo o/r --map 9; RUN_DIR=''; expect_rc 0; expect_has OTHERS; expect_not_called "issue view"; }
 t_frontier_body_fail() { fb_run '"선행: #9"' FAIL; expect_rc 1; case $ERR in *"frontier: 선행 #9 조회 실패"*) ;; *) bad "stderr: $ERR" ;; esac; }
 
+# ---- land.sh 고리(저장소 명령이 있을 때). live_head 로 PR HEAD 를 bare 원격의 feat 에서 읽는다
+loop_setup() { setup_repo; echo "$T/o/r.git" > "$ST/live_head"; }
+bare() { git --git-dir="$T/o/r.git" "$@"; }
+base_commit() { # <파일> <내용> -- main 에 커밋 하나를 올린다
+  ( cd "$T/repo" && printf '%s\n' "$2" > "$1" && git add "$1" && git commit -qm "base: $1" && git push -q origin main ) >/dev/null 2>&1
+}
+PRE='echo pre >> pre-merge.txt && git add pre-merge.txt && git commit -q -m pre-merge'
+last_merge_tip() { grep 'pr merge' "$ST/calls" 2>/dev/null | tail -1 | sed 's/.*--match-head-commit //'; }
+expect_pr_branch() { [ "$(bare rev-parse feat)" = "$1" ] || bad "원격 feat 가 $1 이어야 하는데 $(bare rev-parse feat)"; }
+expect_no_temp() { # land.sh 를 TMPDIR=$T/tmp 로 돌린 뒤: 임시 디렉터리도 임시 worktree 도 남지 않았다
+  [ -z "$(ls -A "$T/tmp")" ] || bad "임시 디렉터리가 남았다: $(ls -A "$T/tmp")"
+  [ "$(git -C "$T/repo" worktree list | wc -l)" = 2 ] || bad "임시 worktree 가 남았다: $(git -C "$T/repo" worktree list)"
+}
+expect_merges() { [ "$(grep -c 'pr merge' "$ST/calls" 2>/dev/null)" = "$1" ] || bad "병합 시도가 $1번이어야 하는데 $(grep -c 'pr merge' "$ST/calls" 2>/dev/null)번"; }
+t_land_loop_retry() { # 병합 때 base 가 움직였으면 새 base 위에서 처음부터 다시 하고, 병합 전 명령도 새 base 위에서 다시 돈다.
+  # remote 의 fetch 설정이 base 를 덮지 않아도 base 의 추적 ref 를 갱신해 이동을 본다
+  loop_setup; local b0 b1 tip; b0=$(bare rev-parse main); echo move > "$ST/on_merge_7"
+  git -C "$T/repo" config remote.origin.fetch +refs/heads/feat:refs/remotes/origin/feat
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "echo \$LAND_BASE_SHA >> $T/pm && $PRE"
+  expect_rc 0; expect_has "LANDED #7"; expect_called "pr ready 7"
+  [ -f "$T/pm" ] && [ "$(wc -l < "$T/pm")" = 2 ] || bad "병합 전 명령이 두 번 돌아야 하는데: $(cat "$T/pm" 2>/dev/null)"
+  b1=$(sed -n 2p "$T/pm" 2>/dev/null); tip=$(last_merge_tip)
+  [ "$(sed -n 1p "$T/pm" 2>/dev/null)" = "$b0" ] || bad "첫 LAND_BASE_SHA 가 처음 base 가 아니다"
+  [ -n "$b1" ] && [ "$b1" != "$b0" ] && [ "$(bare rev-parse "$b1^" 2>/dev/null)" = "$b0" ] || bad "두 번째 LAND_BASE_SHA 가 움직인 base 가 아니다: $b1"
+  bare merge-base --is-ancestor "$b1" "$tip" 2>/dev/null || bad "마지막 병합 tip $tip 이 새 base 의 자손이 아니다"
+  [ "$(bare rev-list --count "$b1..$tip" 2>/dev/null)" = 2 ] || bad "검수한 SHA 에서 새로 돌지 않았다: 새 base 위 커밋 $(bare rev-list --count "$b1..$tip")개"
+  expect_err "land: 올린 tip $tip"
+}
+t_land_loop_transient() { # base 가 그대로인데 Base branch was modified 이면 같은 tip 으로 다시 병합한다
+  loop_setup; echo stay > "$ST/on_merge_7"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "echo x >> $T/pm && $PRE"
+  expect_rc 0; expect_has "LANDED #7"
+  [ -f "$T/pm" ] && [ "$(wc -l < "$T/pm")" = 1 ] || bad "병합 전 명령은 한 번만 돌아야 한다"
+  [ "$(grep -oE '^pr merge|headRefOid,mergeable' "$ST/calls" | tr '\n' ' ')" = "headRefOid,mergeable pr merge headRefOid,mergeable pr merge " ] \
+    || bad "mergeable 을 다시 기다린 뒤 두 번 병합해야 한다: $(grep -oE '^pr merge|headRefOid,mergeable' "$ST/calls" | tr '\n' ' ')"
+}
+t_land_loop_check_fails() { # 검사가 지면 병합 전 명령도 push 도 병합도 하지 않고 PR 은 draft 로 남는다
+  loop_setup; base_commit c c
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check "exit 1" --pre-merge "touch $T/pm && $PRE"
+  expect_rc 1; expect_last "BLOCKED #7 검사 실패: exit 1"; expect_not_called "pr merge"; expect_not_called "pr ready"; expect_gone "$T/pm"
+  expect_pr_branch "$HEAD_SHA"; [ "$(jq .isDraft "$ST/pr_7.json")" = true ] || bad "draft 로 남아야 한다"
+}
+t_land_loop_conflict() { # rebase 가 충돌하면 되돌리고 충돌 파일을 stderr 로 내며, 임시 worktree 와 디렉터리를 남기지 않는다
+  loop_setup; base_commit b other; mkdir "$T/tmp"
+  TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 base 와 충돌한다 -- rebase 가 필요하다"; expect_not_called "pr merge"
+  printf '%s\n' "$ERR" | grep -qx b || bad "stderr 에 충돌 파일 b 가 한 줄로 없다: $ERR"
+  expect_no_temp; expect_pr_branch "$HEAD_SHA"
+}
+patch_setup() { # main 에 아홉 줄 파일 p, feat 위에 p 의 1행과 5행을 바꾼 커밋
+  loop_setup; base_commit p "$(seq 1 9)"
+  ( cd "$T/wt" && git fetch -q origin && git rebase -q origin/main && sed -i -e 1s/1/one/ -e 5s/5/five/ p \
+    && git commit -qam "feat: p" && git push -qf origin feat ) >/dev/null 2>&1
+  HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD)
+}
+base_edit() { ( cd "$T/repo" && sed -i "$1" p && git commit -qam "base: p" && git push -q origin main ) >/dev/null 2>&1; }
+t_land_loop_patch() { # base 가 문맥 줄만 바꾸면 패치가 같고(-U0), PR 이 바꾼 줄을 base 가 먼저 바꿨거나 PR 을 이미 품었으면 바뀌었다
+  patch_setup; base_edit 3s/3/three/
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 0; expect_has "LANDED #7"
+  patch_setup; base_edit 1s/1/one/
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 rebase 가 패치를 바꿨다"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"
+  patch_setup; bare update-ref refs/heads/main "$(bare commit-tree "$HEAD_SHA^{tree}" -p "$HEAD_SHA" -m after)"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 rebase 가 패치를 바꿨다"
+}
+t_land_loop_patch_count() { # rebase 가 base 에 이미 있는 PR 커밋 하나를 빼면, 남은 커밋과 patch-id 가 같아도 개수가 달라 바뀌었다
+  loop_setup; base_commit q "$(seq 1 9)"
+  ( cd "$T/wt" && git fetch -q origin && git rebase -q origin/main && sed -i '2a x' q && git commit -qam "feat: q 2" \
+    && sed -i '7a x' q && git commit -qam "feat: q 7" && git push -qf origin feat ) >/dev/null 2>&1
+  HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD)
+  ( cd "$T/repo" && sed -i '6a x' q && git commit -qam "base: q" && git push -q origin main ) >/dev/null 2>&1
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 rebase 가 패치를 바꿨다"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_rounds() { # round 마다 base 가 움직이면 상한(기본 3)에서 멈추고 PR 브랜치를 검수한 SHA 로 되돌린다. round 는 병합 시도다
+  loop_setup; printf 'move\nmove\nmove\nmove\n' > "$ST/on_merge_7"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_last "BLOCKED #7 base 가 움직여 3번 다시 했다"; expect_merges 3; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_push_env() { # --push-env 는 여러 번 주고, tip push 와 복원 push 모두에 붙는다(pre-push git hook 이 env 를 기록한다)
+  loop_setup; echo "something else broke" > "$ST/merge_err"
+  printf '#!/bin/sh\nwhile read -r l s r o; do echo "${PUSH_X:-none}/${PUSH_Y:-none} $s" >> %s/hook; done\n' "$T" > "$T/repo/.git/hooks/pre-push"
+  chmod +x "$T/repo/.git/hooks/pre-push"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE" --push-env PUSH_X=q1 --push-env PUSH_Y=q2
+  expect_rc 1; expect_last "BLOCKED #7 gh pr merge 실패: something else broke"; expect_pr_branch "$HEAD_SHA"
+  local first; first=$(head -1 "$T/hook" 2>/dev/null)
+  [ "${first% *}" = q1/q2 ] && [ "${first#* }" != "$HEAD_SHA" ] || bad "tip push 에 env 가 없다: $first"
+  grep -qx "q1/q2 $HEAD_SHA" "$T/hook" 2>/dev/null || bad "복원 push 에 env 가 없다: $(cat "$T/hook" 2>/dev/null)"
+}
+t_land_loop_needs_human() { # 사람의 승인이 필요하면 올린 tip 을 되돌리지 않는다
+  loop_setup; echo "GraphQL: At least 1 approving review is required by reviewers with write access." > "$ST/merge_err"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 3; expect_has "NEEDS_HUMAN #7"
+  [ "$(bare rev-parse feat)" != "$HEAD_SHA" ] && [ "$(bare rev-parse feat^)" = "$HEAD_SHA" ] || bad "올린 tip 이 남아야 한다"
+}
+t_land_loop_hn_nopush() { # 올릴 것이 없으면 NEEDS_HUMAN 이어도 PR HEAD 는 검수한 SHA 이고 올린 tip 줄이 없다
+  loop_setup; echo "GraphQL: At least 1 approving review is required by reviewers with write access." > "$ST/merge_err"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 3; expect_pr_branch "$HEAD_SHA"; case $ERR in *"land: 올린 tip"*) bad "push 했다" ;; esac
+}
+t_land_loop_args() {
+  setup_repo
+  run land.sh --repo o/r --pr 7 --sha 0123456789 --check true --pre-merge true --push-env A=1 --push-env B=x=y; expect_rc 1
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --via x --check true; expect_rc 2
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --via x --push-env A=1; expect_rc 2
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true --push-env BAD; expect_rc 2
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true --push-env 1A=1; expect_rc 2
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --push-env A=1; expect_rc 2
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true --check false; expect_rc 2
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge true --pre-merge false; expect_rc 2
+  run land.sh --cleanup --repo o/r --pr 7 --pre-merge true; expect_rc 2
+  run land.sh --cleanup --repo o/r --pr 7 --check true; expect_rc 2
+  expect_not_called "pr merge"; expect_not_called "pr ready"
+}
+
+t_land_loop_lease() { # 검수 뒤 남이 PR 브랜치에 push 하고 그것이 fetch 돼 추적 ref 가 따라가도 명시 lease 가 덮지 않는다
+  loop_setup; base_commit c c
+  git clone -q "$T/o/r.git" "$T/other" 2>/dev/null; git -C "$T/other" checkout -q feat
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" \
+    --check "( cd $T/other && echo z > z && git add z && git commit -qm other && git push -q origin feat ) >/dev/null 2>&1 && git fetch -q origin"
+  local theirs; theirs=$(git -C "$T/other" rev-parse HEAD)
+  expect_rc 1; expect_last "BLOCKED #7 PR 브랜치에 push 하지 못했다"; expect_pr_branch "$theirs"
+}
+t_land_loop_merged_keeps_tip() { # gh pr merge 가 0 으로 끝난 뒤의 BLOCKED 는 올린 tip 을 되돌리지 않는다(큐에 든 PR 을 덮지 않게)
+  loop_setup; touch "$ST/fail_json_state"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_has "gh pr merge 뒤에도"
+  [ "$(bare rev-parse feat^)" = "$HEAD_SHA" ] || bad "병합 뒤에 PR 브랜치를 되돌렸다: $(bare rev-parse feat)"
+}
+t_land_loop_transient_counts() { # base 가 그대로인 Base branch was modified 도 round 로 센다
+  loop_setup; printf 'stay\nstay\n' > "$ST/on_merge_7"
+  LAND_ROUNDS=1 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_last "BLOCKED #7 base 가 움직여 1번 다시 했다"; expect_merges 1; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_delete_no_env() { # 정리 단계의 브랜치 삭제 push 에는 --push-env 를 주지 않는다
+  loop_setup
+  printf '#!/bin/sh\nwhile read -r l s r o; do echo "${PUSH_X:-none} $s" >> %s/hook; done\n' "$T" > "$T/repo/.git/hooks/pre-push"
+  chmod +x "$T/repo/.git/hooks/pre-push"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE" --push-env PUSH_X=q1
+  expect_rc 0; expect_has "LANDED #7"
+  grep -qx "none 0000000000000000000000000000000000000000" "$T/hook" 2>/dev/null || bad "삭제 push 가 env 없이 돌지 않았다: $(cat "$T/hook" 2>/dev/null)"
+}
+t_land_loop_merge_commit() { # 범위에 merge 커밋이 있으면 패치가 바뀐 것으로 본다. side 의 날짜를 하루 늦춰 log 순서가 rebase 순서와 같게 한다(patch-id 목록만으로는 같음)
+  loop_setup
+  ( cd "$T/wt" && git checkout -q -b side HEAD~1 && echo s > s && git add s && GIT_COMMITTER_DATE="$(( $(date +%s) + 86400 )) +0000" git commit -qm side && git checkout -q feat \
+    && git merge -q --no-ff side -m merge && git push -q origin feat ) >/dev/null 2>&1
+  HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD); base_commit c c
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 rebase 가 패치를 바꿨다"; expect_not_called "pr merge"
+}
+t_land_loop_premerge_bad() { # 병합 전 명령이 지거나, 트리를 더럽히거나, rebase 된 tip 을 버리면 BLOCKED 이고 push 하지 않는다
+  local c
+  for c in "exit 1" "touch junk" "git commit -q --amend -m rewritten"; do
+    loop_setup; base_commit c c
+    run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$c"
+    expect_rc 1; expect_last "BLOCKED #7 병합 전 명령이 실패했다: $c"; expect_pr_branch "$HEAD_SHA"; expect_not_called "pr merge"
+  done
+}
+t_land_loop_rounds_arg() { setup_repo; LAND_ROUNDS=1 run land.sh --repo o/r --pr 7 --sha 0123456789 --check true; expect_rc 1
+  LAND_ROUNDS=0 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true; expect_rc 2
+  LAND_ROUNDS=x run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true; expect_rc 2; }
+t_land_loop_env() { # 두 명령은 rebase 된 tip 의 임시 worktree 루트에서 env 를 받아 돌고, 출력은 stderr 로 간다. 커밋 0개인 병합 전 명령,
+  # --keep 이어도 임시 worktree 는 지우고 PR 의 worktree 와 로컬 브랜치는 건드리지 않는다
+  loop_setup; base_commit c c; mkdir "$T/tmp"; local b k e h tmp cwd top at
+  b=$(bare rev-parse main); tmp=$(cd "$T/tmp" && pwd -P)
+  printf '%s\n' 'echo "out-$1"' 'echo "$LAND_REPO $LAND_PR $LAND_BRANCH $LAND_BASE $LAND_BASE_SHA $LAND_SHA $LAND_HEAD" > "$0.$1"' \
+    'echo "$(pwd -P) $(git rev-parse --show-toplevel) $(git rev-parse HEAD)" >> "$0.$1"' > "$T/rec"
+  TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "${HEAD_SHA:0:9}" --keep --check "sh $T/rec check" --pre-merge "sh $T/rec pre"
+  expect_rc 0; expect_has "LANDED #7"; expect_not "out-"; expect_err "out-check"; expect_err "out-pre"
+  for k in check pre; do
+    e=$(sed -n 1p "$T/rec.$k" 2>/dev/null); h=${e##* }
+    [ "$e" = "o/r 7 feat main $b $HEAD_SHA $h" ] || bad "$k 의 env: $e"
+    [ "$(git -C "$T/repo" rev-parse "$h^" 2>/dev/null)" = "$b" ] || bad "$k 의 LAND_HEAD 가 base $b 위에 rebase 된 tip 이 아니다: $h"
+    read -r cwd top at < <(sed -n 2p "$T/rec.$k" 2>/dev/null)
+    [ "$cwd" = "$top" ] && [ "${cwd#"$tmp"/}" != "$cwd" ] && [ "$at" = "$h" ] || bad "$k 이 rebase 된 tip 의 임시 worktree 루트에서 돌지 않았다: $cwd $top $at"
+  done
+  [ "$(last_merge_tip)" = "$h" ] || bad "커밋 0개인 병합 전 명령 뒤에는 rebase 된 tip 으로 병합해야 한다"
+  expect_no_temp
+  [ "$(git -C "$T/wt" rev-parse HEAD)" = "$HEAD_SHA" ] && [ "$(git -C "$T/repo" rev-parse feat)" = "$HEAD_SHA" ] || bad "PR 의 worktree 나 로컬 브랜치가 움직였다"
+}
+t_land_loop_base() { # --base 로 바꾼 대상 위로 rebase 하고, 기록 댓글과 대상 변경은 round 를 거듭해도 고리 앞에서 한 번만 한다
+  loop_setup; local n
+  ( cd "$T/repo" && git checkout -q -b next && echo n > n && git add n && git commit -qm next && git push -q origin next && git checkout -q main ) >/dev/null 2>&1
+  n=$(bare rev-parse next); echo move > "$ST/on_merge_7"; echo 기록 > "$T/ev"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --issue 5 --evidence "$T/ev" --base next --pre-merge "echo \$LAND_BASE \$LAND_BASE_SHA >> $T/pm && $PRE"
+  expect_rc 0; expect_has "LANDED #7"
+  [ "$(grep -c 'issue comment' "$ST/calls")" = 1 ] && [ "$(grep -c 'X PATCH' "$ST/calls")" = 1 ] || bad "기록 댓글, 대상 변경이 한 번이 아니다: $(tr '\n' '|' < "$ST/calls")"
+  [ "$(sed -n 1p "$T/pm" 2>/dev/null)" = "next $n" ] || bad "첫 round 의 base 가 next 가 아니다: $(cat "$T/pm" 2>/dev/null)"
+  bare merge-base --is-ancestor "$n" "$(last_merge_tip)" 2>/dev/null || bad "병합한 tip 이 next 위가 아니다"
+}
+t_land_loop_unknown() { # mergeable 이 끝내 UNKNOWN 이면 병합하지 않고 BLOCKED, 되돌린다
+  loop_setup; base_commit c c; pr 7 mergeable=UNKNOWN
+  LAND_TRIES=2 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 mergeable 이 끝내 UNKNOWN 이다"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_base_rewound() { # base 가 강제로 되감겨도 받는다(+refspec): 되감긴 base 가 조상이면 rebase 없이 넣는다
+  loop_setup; base_commit c c; bare update-ref refs/heads/main "$(bare rev-parse main^)"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 0; expect_has "LANDED #7"; [ "$(last_merge_tip)" = "$HEAD_SHA" ] || bad "rebase 없이 검수한 SHA 로 병합해야 한다"
+}
+t_land_loop_conflicting() { loop_setup; pr 7 mergeable=CONFLICTING
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 base 와 충돌한다 -- rebase 가 필요하다"; expect_not_called "pr merge"; }
+
+t_land_loop_term_on_push() { # push 하는 동안 TERM 을 받아도 끝나기 전에 PR 브랜치를 검수한 SHA 로 되돌린다
+  loop_setup
+  printf '#!/bin/sh\ncat >/dev/null\n[ -e %s/killed ] && exit 0\ntouch %s/killed\nkill -TERM "$(ps -o ppid= -p $PPID | tr -d " ")"\n' "$T" "$T" > "$T/repo/.git/hooks/pre-push"
+  chmod +x "$T/repo/.git/hooks/pre-push"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_term_on_poll() { # push 뒤 기다리는 동안 TERM 을 받으면 되돌린다
+  loop_setup; pr 7 mergeable=UNKNOWN
+  ( cd "$T/repo" && LAND_POLL=1 LAND_TRIES=20 exec bash "$SCRIPTS/land.sh" --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE" ) >"$T/so" 2>"$T/se" &
+  local p=$! i
+  for i in $(seq 1 50); do [ "$(bare rev-parse feat)" != "$HEAD_SHA" ] && break; sleep 0.1; done
+  kill -TERM $p; wait $p; RC=$?
+  expect_rc 1; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_undo_round2() { # 2 round 의 push 가 지면 1 round 에 올린 tip 에서 검수한 SHA 로 되돌린다
+  loop_setup; echo move > "$ST/on_merge_7"
+  printf '#!/bin/sh\nn=$(cat %s/n 2>/dev/null || echo 0); echo $((n+1)) > %s/n\n[ "$n" != 1 ]\n' "$T" "$T" > "$T/repo/.git/hooks/pre-push"
+  chmod +x "$T/repo/.git/hooks/pre-push"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_last "BLOCKED #7 PR 브랜치에 push 하지 못했다"; expect_merges 1; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_undo_round1_noise() { # 1 round 의 push 가 지면 PR 브랜치는 검수한 SHA 그대로라 되돌리지 않고, 되돌리기 실패도 알리지 않는다
+  loop_setup
+  printf '#!/bin/sh\nexit 1\n' > "$T/repo/.git/hooks/pre-push"; chmod +x "$T/repo/.git/hooks/pre-push"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_last "BLOCKED #7 PR 브랜치에 push 하지 못했다"; expect_pr_branch "$HEAD_SHA"
+  case $ERR in *되돌리지*) bad "거짓 복원 실패 알림: $ERR" ;; esac
+}
+t_land_loop_restore_lease() { # 복원 push 도 명시 lease 다: 병합 시도 중 남이 push 하고 그것이 fetch 돼도 덮지 않고 실패를 알린다
+  loop_setup; echo "something else broke" > "$ST/merge_err"
+  git clone -q "$T/o/r.git" "$T/other" 2>/dev/null
+  printf 'cd %s/other && git fetch -q origin && git checkout -q -B feat origin/feat && echo z > z && git add z && git commit -qm other && git push -q origin feat && git -C %s/repo fetch -q origin\n' "$T" "$T" > "$ST/merge_hook"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE"
+  expect_rc 1; expect_last "BLOCKED #7 gh pr merge 실패: something else broke"; expect_pr_branch "$(git -C "$T/other" rev-parse HEAD)"
+  expect_err "되돌리지 못했다"
+}
+t_land_loop_tip_unseen() { # PR HEAD 가 올린 tip 이 되지 않으면 ready 도 병합도 하지 않고 BLOCKED, 되돌린다
+  setup_repo; base_commit c c
+  LAND_TRIES=2 run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_has "BLOCKED #7 PR HEAD 가 올린 tip"; expect_not_called "pr merge"; expect_not_called "pr ready"; expect_pr_branch "$HEAD_SHA"
+}
+t_land_loop_move_other_msg() { # base 이동은 gh 메시지가 아니라 fetch 비교로 판정한다
+  loop_setup; echo "move GraphQL: Pull Request is not mergeable (mergePullRequest)" > "$ST/on_merge_7"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "echo x >> $T/pm && $PRE"
+  expect_rc 0; expect_has "LANDED #7"; [ "$(wc -l < "$T/pm")" = 2 ] || bad "다시 돌지 않았다: $(cat "$T/pm")"
+}
+t_land_loop_merge_commit_no_rebase() { # base 가 이미 조상이면 패치 판정을 건너뛰므로 범위에 merge 커밋이 있어도 넣는다. tip 이 PR HEAD 그대로라 push 하지 않는다
+  loop_setup
+  ( cd "$T/wt" && git checkout -q -b side HEAD~1 && echo s > s && git add s && git commit -qm side && git checkout -q feat \
+    && git merge -q --no-ff side -m merge && git push -q origin feat ) >/dev/null 2>&1
+  HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD)
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 0; expect_has "LANDED #7"; case $ERR in *"land: 올린 tip"*) bad "올릴 것이 없는데 push 했다: $ERR" ;; esac
+}
+t_land_loop_term_in_merge() { # 병합 호출 중에 TERM 을 받아도 병합이 이뤄졌으면 PR 브랜치를 되돌리지 않는다
+  loop_setup; printf 'while [ ! -s %s/pid ]; do sleep 0.05; done; kill -TERM "$(cat %s/pid)"\n' "$T" "$T" > "$ST/merge_hook"
+  ( cd "$T/repo" && exec bash "$SCRIPTS/land.sh" --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE" ) >"$T/so" 2>"$T/se" &
+  local p=$!; echo "$p" > "$T/pid"; wait "$p"; RC=$?
+  [ "$(jq -r .state "$ST/pr_7.json")" = MERGED ] || bad "병합 호출에 닿지 않았다: $(cat "$T/se")"
+  expect_rc 1; expect_pr_branch "$(jq -r .mergeCommit.oid "$ST/pr_7.json")"
+}
+
 # CASES 에 적힌 이름의 함수가 없으면(오타, 이름 바꾸기, 지운 함수) 그 경우를 FAIL 로 센다. 이 하네스의 복사본에
 # 없는 이름을 끼워 돌려 본다.
 t_missing_case_fn() {
@@ -438,6 +728,9 @@ t_missing_case_fn() {
 
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_method_squash
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
+land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
+land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
+land_loop_base land_loop_unknown land_loop_base_rewound land_loop_patch_count land_loop_hn_nopush
 check_ok check_fails check_forbid_rename check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
 check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
