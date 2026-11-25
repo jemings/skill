@@ -37,7 +37,7 @@
 # 다음 실행이 "검수한 SHA 와 다르다" 로 멈춘다.
 # 남는 경합: 병합 직전 확인과 병합 호출 사이에 base 가 움직이면 막지 못한다. 병합 뒤 병합 커밋(rebase 병합이면 마지막 커밋)의
 # 부모 쪽 base 가 round 의 base 가 아니면 stderr 에 경고 한 줄만 낸다.
-# env: LAND_ROUNDS round 상한(기본 3), LAND_TRIES/LAND_POLL mergeable 대기 횟수와 간격(기본 30, 10초).
+# env: LAND_ROUNDS round 상한(기본 3. 저장소 명령이 없는 gh 병합에서는 Base branch was modified 로 진 병합을 다시 하는 상한), LAND_TRIES/LAND_POLL mergeable 대기 횟수와 간격(기본 30, 10초).
 #
 # 출력(마지막 줄이 판정):
 #   LANDED #P <병합 커밋> [ISSUE #N OPEN|CLOSED]   exit 0
@@ -46,6 +46,7 @@
 #     | 검사 실패: <cmd> | 병합 전 명령이 실패했다: <cmd> | base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS)
 #     | PR 브랜치에 push 하지 못했다 (lease 거절이면 검수 뒤 남이 push 했다) | PR HEAD 가 올린 tip <sha> 이 되지 않았다(<HEAD>)
 #     | base <b> 를 받지 못했다 | 임시 worktree 를 만들지 못했다 | 임시 디렉터리를 만들지 못했다
+#   gh 병합(저장소 명령 없음)의 이유: base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS) | PR HEAD 가 병합 직전에 바뀌었다: <gh 오류 한 줄> (두 길 모두)
 #   NEEDS_HUMAN #P <gh 오류 한 줄>                  exit 3  (보호 규칙이 사람의 승인을 요구한다. PR 은 ready 로 남는다)
 #   CLEANED #P                                      exit 0  (--cleanup)
 #   인자가 틀리면 exit 2.
@@ -92,7 +93,6 @@ mode=gh
 if [ -n "$check$pre_merge" ]; then
   [ "$mode" = gh ] || die "--via 와 --check, --pre-merge 는 함께 주지 않는다"
   mode=loop
-  [[ $ROUNDS =~ ^[1-9][0-9]*$ ]] || die "LAND_ROUNDS 는 1 이상의 정수다: $ROUNDS"
 fi
 [ ${#push_env[@]} = 0 ] || [ "$mode" = loop ] || die "--push-env 는 --check 나 --pre-merge 와만 준다"
 if [ "$cleanup" = 1 ]; then
@@ -101,6 +101,7 @@ else
   [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "--sha 에 검수한 PR HEAD 를 줘라"
   [ -z "$evidence" ] || [ -f "$evidence" ] || die "--evidence 파일이 없다: $evidence"
   [ -z "$evidence" ] || [ -n "$issue" ] || die "--evidence 에는 --issue 가 있어야 한다"
+  [ "$mode" = via ] || [[ $ROUNDS =~ ^[1-9][0-9]*$ ]] || die "LAND_ROUNDS 는 1 이상의 정수다: $ROUNDS"
 fi
 
 view() { gh pr view "$1" --repo "$repo" --json "$2" --jq "$3"; }
@@ -154,6 +155,8 @@ merge_failed() { # <gh pr merge 의 stderr> -- 판정 줄을 내고 끝낸다
   local line
   line=$(printf '%s\n' "$1" | grep -v '^\s*$' | tail -1)
   case $1 in
+    *"Head branch was modified"*)
+      out "BLOCKED #$pr PR HEAD 가 병합 직전에 바뀌었다: $line"; exit 1 ;;
     *[Rr]eview*|*approv*|*protected*|*"not authorized"*|*"required status"*)
       out "NEEDS_HUMAN #$pr $line"; exit 3 ;;
   esac
@@ -257,6 +260,26 @@ land_loop() {
   done
   out "BLOCKED #$pr base 가 움직여 ${ROUNDS}번 다시 했다"; exit 1
 }
+land_gh() {
+  local attempt err
+  for attempt in $(seq 1 "$ROUNDS"); do
+    [ "$attempt" = 1 ] || mergeable=$(view "$pr" mergeable .mergeable) || mergeable=UNKNOWN
+    for _ in $(seq 1 "$TRIES"); do
+      [ "$mergeable" = UNKNOWN ] || break
+      sleep "$POLL" # GitHub 가 mergeable 을 계산하는 중이다
+      mergeable=$(view "$pr" mergeable .mergeable) || mergeable=UNKNOWN
+    done
+    case $mergeable in
+      CONFLICTING) out "BLOCKED #$pr base 와 충돌한다 -- rebase 가 필요하다"; exit 1 ;;
+      UNKNOWN) out "BLOCKED #$pr mergeable 이 끝내 UNKNOWN 이다"; exit 1 ;;
+    esac
+    resolve_method
+    err=$(gh pr merge "$pr" --repo "$repo" "--$method" --match-head-commit "$head" 2>&1 >/dev/null) && return 0
+    case $err in *"Base branch was modified"*) continue ;; esac
+    merge_failed "$err"
+  done
+  out "BLOCKED #$pr base 가 움직여 ${ROUNDS}번 다시 했다"; exit 1
+}
 warn_off_base() { # <병합 커밋>
   local parent=''
   fetch_base || return 0
@@ -304,17 +327,7 @@ elif [ "$mode" = via ]; then
   done
   [ "$state" = MERGED ] || { out "BLOCKED #$pr 착륙 명령은 끝났는데 PR 이 $state 다"; exit 1; }
 else
-  for _ in $(seq 1 "$TRIES"); do
-    [ "$mergeable" = UNKNOWN ] || break
-    sleep "$POLL" # GitHub 가 mergeable 을 계산하는 중이다
-    mergeable=$(view "$pr" mergeable .mergeable) || mergeable=UNKNOWN
-  done
-  case $mergeable in
-    CONFLICTING) out "BLOCKED #$pr base 와 충돌한다 -- rebase 가 필요하다"; exit 1 ;;
-    UNKNOWN) out "BLOCKED #$pr mergeable 이 끝내 UNKNOWN 이다"; exit 1 ;;
-  esac
-  resolve_method
-  err=$(gh pr merge "$pr" --repo "$repo" "--$method" --match-head-commit "$head" 2>&1 >/dev/null) || merge_failed "$err"
+  land_gh
 fi
 if [ "$mode" != via ]; then
   state=$(view "$pr" state .state) || state='?'
