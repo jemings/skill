@@ -102,3 +102,31 @@ heredoc 본문의 홀수 따옴표도 스캐너는 어긋남으로 센다(heredo
 bash scripts/check-quotes.sh plugins/agent-dispatch
 bash scripts/test-check-quotes.sh
 ```
+
+## plugins/ 를 고치면 스킬 스캐너 게이트를 돌린다
+
+사내 스킬 스캐너(`cisco-ai-skill-scanner` 2.3.2)는 `check-ascii.sh`, `check-quotes.sh` 가
+옮겨 놓은 규칙 말고도 많은 것을 CRITICAL, HIGH 로 잡는다(예: `find -exec` 의
+`COMPOUND_FIND_EXEC`, #71). `plugins/` 아래를 고쳤다면 커밋 전에 스캐너를 통째로
+돌려 `is_safe` 로 판정한다. 통과(exit 0)는 출력이 없고, exit 1 은 `파일:줄:규칙 심각도`
+를 낸다:
+
+```bash
+bash scripts/check-scan.sh plugins
+```
+
+exit 3 은 스캐너를 못 쓴다는 뜻이다(통과가 아니다). stderr 의 안내대로 한 번 깔고
+`SKILL_SCANNER` 로 가리킨 뒤 다시 돈다(설치에만 네트워크가 필요하다):
+
+```bash
+uv venv <dir> && uv pip install --python <dir>/bin/python cisco-ai-skill-scanner==2.3.2
+SKILL_SCANNER=<dir>/bin/skill-scanner bash scripts/check-scan.sh plugins
+```
+
+이 도구를 고쳤다면 하네스를 돌린다. `SCANNER_BIN` 에 실제 스캐너를 주면 2.10.0 커밋
+(`ece1885`)이 `COMPOUND_FIND_EXEC` 로 걸리는지까지 대조한다:
+
+```bash
+bash scripts/test-check-scan.sh
+SCANNER_BIN=<dir>/bin/skill-scanner bash scripts/test-check-scan.sh
+```
