@@ -68,8 +68,16 @@ description: >-
     `감시 없음(판정할 흔적 없음)` 으로 적는다(다시 걸면 곧바로 `UNKNOWN` 으로 끝나 되풀이된다). 그 agent 는 알림으로
     기다리고, 다음 알림과 보고 때마다 `--wait` 없이 한 번 판정해 판정이 나오면 그때 다시 건다. `STALLED` 면 아래
     "깨운다"의 차례대로 다시 건다.
-    서브에이전트의 리포트가 오면 `TaskStop` 하고 `감시 없음` 으로 적는다. 멈춘 task 의 알림은 무시한다. 감시는
+    서브에이전트의 리포트가 오면 그 agent 의 감시 task 를 `TaskStop` 하고 `감시 없음` 으로 적는다. 멈춘 task 의 알림은 무시한다. 감시는
     지켜보기(`wait-prs.sh`, 9단계)와 따로 센다.
+  - **리포트 뒤의 알림**: 알림 본문으로 가른다. 본문이 `has not reported yet` 이면 위 감시와 판정 규칙을 따른다.
+    리포트를 받은 뒤 그 agent 의 본문이 `report was delivered` 이고 `still running` 이면, 판정 없이
+    **그 agent id 로 `TaskStop`** 을 리포트마다 한 번 한다(감시 task 의 `TaskStop` 과 다르다).
+    `No task found` 는 이미 끝난 것이니 무시한다. 그 리포트 뒤에도 오는 알림은 정보로만 읽는다.
+    이어 하기(Fix 등)는 `SendMessage` 가 agent 를 다시 깨우고, 깨어난 agent 의 다음 리포트에서 이 규칙이 새로 시작된다.
+    근거: 하네스 알림 본문은 리포트 전이면 `This agent has not reported yet: it is waiting on its own background work`,
+    리포트 뒤면 `This agent's report was delivered to you as a message from "<id>"` 에 `stopped with background work of
+    its own still running` 이 붙는다(2026-11 로컬 기록 사후 분석).
   - **깨운다**: 감시가 `STALLED` 로 끝나면 이 차례로 한다.
     1. `SendMessage` 를 보내기 **직전에** `date +%s` 로 깨움 시각을 재어 진행 목록 그 줄에 `깨움 <epoch>` 으로 적는다.
        보낸 뒤에 재면 그사이에 온 응답을 놓친다.
@@ -331,8 +339,9 @@ worktree, PR 이 생기지 않게 한다.
      로그 파일을 worktree 밖에 남기게 하고 판정 줄을 네가 직접 읽는다. 하위 에이전트의 "통과" 요약만으로 받지 않는다.
      그 지시에는 기다림 규칙을 넣는다(implement-brief 의 `**Waiting**` 줄을 그대로 옮긴다): 긴 실행은 그 실행 자체를
      `run_in_background` 로 띄우고 `&`, `nohup`, `setsid`, `( ... & )` 로 떼어 띄우지 않는다. 로그나 다른 task 출력을
-     폴링하는 루프를 쓰지 않는다(꼭 써야 하면 `timeout` 으로 묶고 기다리는 실행이 끝나면 루프도 끝나게 한다). 턴을
-     끝내며 기다릴 때는 무엇을 기다리고 언제 끝날지 그 실행의 로그 경로와 함께 한 줄로 쓴다.
+     폴링하는 루프를 쓰지 않는다(꼭 써야 하면 `timeout` 으로 묶고 기다리는 실행이 끝나면 루프도 끝나게 한다). 마지막이
+     아닌 턴을 끝내며 기다릴 때는 무엇을 기다리고 언제 끝날지 그 실행의 로그 경로와 함께 한 줄로 쓴다. 리포트 전에는 띄운
+     백그라운드 실행이 끝나기를 기다리거나 `TaskStop` 하고, 멈춘 것을 리포트에 적어 아무것도 남기지 않는다.
    - (b) **판정 줄**: 실행기가 실행 시점에 **스스로 계산해** 찍은 40자 SHA 가 든 판정 줄. SHA 가 PR `headRefOid` 와 같고,
      줄에 계약서의 시험 id 가 들어 있고, 로그가 worktree 밖에 있어야 한다(8단계 뒷정리가 worktree 를 지운다). 에이전트가
      인자로 넘긴 SHA 를 그대로 찍는 실행기는 안 된다. 실행기 코드에서 SHA 를 계산하는 `file:line` 을 확인한다. 판정은
