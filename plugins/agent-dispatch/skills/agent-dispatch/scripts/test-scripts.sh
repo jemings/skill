@@ -1540,6 +1540,55 @@ case_judgment_static() { # 상한 문구 부재, 판단 문단의 규칙 문장,
   grep -qF '되돌림, 리뷰 라운드에 세지 않는다' "$dir/references/watching.md" || bad "(e) watching.md 에 사람이 요청한 Fix 는 세지 않는 문장이 없다"
 }
 
+# 시험 범위: 내부 고리는 좁게, 최종 SHA 에서 전체 한 번, 커밋마다 전체는 없다(#80). 규칙 문장은 통째로, 그 절 안에서만 찾는다.
+case_test_scope_static() { # implement-brief Then 3, Follow-up, Report, review-brief 변이, SKILL.md 7단계 3,5항, 5단계 시험 항목, sequence 카드
+  local dir=$SCRIPTS/.. sk ib rb dc f sec all rest
+  sk=$dir/SKILL.md ib=$dir/references/implement-brief.md rb=$dir/references/review-brief.md dc=$dir/references/disciplines.md
+  # (a) implement-brief Then: 내부 고리, 최종 실행, 커밋별 싼 검사(커밋 보존일 때만), 전체를 강제하는 경우
+  sec=$(awk '/^\*\*Then:\*\*/ { f = 1 } /^These instructions and the contract/ { f = 0 } f' "$ib" | joined)
+  [ -n "$sec" ] || bad "(a) implement-brief 에 Then 절이 없다"
+  for f in 'Inner loop (while you fix): run only the failing tests and the tests that touch the files you changed (for example the runner'\''s last-failed option, or the test files of the changed modules).' \
+    'Final run: on the exact SHA you push, run the whole test set the contract and repo rules require, once.' \
+    'Never run the whole test set once per commit.' \
+    'Per-commit check: if the contract or repo rules name a cheap per-commit check (seconds: import, compile, collect, lint) and the repo keeps commits when merging (rebase, merge), run only that check on each commit with `git rebase -x`.' \
+    'If the repo squashes, there is no per-commit check.' \
+    'The inner loop runs the whole set too when: a dependency or lock file changed; a test harness or shared fixture changed; the base moved; the contract names no carry-over path for that test; the repo cannot run selected tests.'; do
+    case $sec in *"$f"*) ;; *) bad "(a) implement-brief Then 에 '${f:0:60}...' 문장이 없다" ;; esac
+  done
+  # (b) Follow-up: 좁게 고치고 최종 SHA 에서 전체 한 번, tree 가 같으면 다시 돌리지 않고 SHA 를 적는다, 갈래마다 그 줄을 가리킨다
+  sec=$(awk '/^\*\*Follow-up requests\*\*/ { f = 1 } /^## When to stop/ { f = 0 } f' "$ib" | joined)
+  for f in 'Fix/따라잡기 checks: narrow while you fix, the whole set once on the final SHA, as in Then 3.' \
+    'If `git rev-parse <final SHA>^{tree}` equals the tree of an earlier SHA on which you ran the whole set green, do not rerun it: name that SHA in your report (the orchestrator takes it over with `--carry`).'; do
+    case $sec in *"$f"*) ;; *) bad "(b) implement-brief Follow-up 에 '${f:0:60}...' 문장이 없다" ;; esac
+  done
+  [ "$(printf '%s\n' "$sec" | grep -oF 'run the checks as the Fix/따라잡기 checks bullet says;' | wc -l)" = 2 ] || bad "(b) Follow-up 의 두 갈래가 Fix/따라잡기 checks 줄을 가리키지 않는다"
+  # (c) Report: 최종 실행의 판정 줄과 이어 받은 SHA
+  sec=$(awk '/^## Report/ { f = 1 } f' "$ib" | joined)
+  case $sec in *'For the final run: the verdict line with the full 40-char SHA, as the runner printed it. If you did not rerun because the tree matched, give the SHA whose result you carry over.'*) ;; *) bad "(c) implement-brief Report 에 최종 실행의 판정 줄, 이어 받은 SHA 문장이 없다" ;; esac
+  # (d) 커밋마다 전체 시험을 요구하는 문구가 어느 지시문, SKILL.md 에도 없다. rebase -x 는 싼 검사 문장에만 있다
+  all=$(cat "$sk" "$dir"/references/*.md | joined)
+  rest=${all//'Never run the whole test set once per commit.'/}
+  for f in '(each|every|per) commit[^.]{0,60}(whole|full|all) (test|check)' '(whole|full|all) (test|check)[^.]{0,40}(each|every|per) commit' '커밋마다[^.,]{0,12}(전체|전부|모든 시험)' '(전체|전부)[^.,]{0,12}커밋마다' 'rerun the checks'; do
+    printf '%s\n' "$rest" | grep -qE -- "$f" && bad "(d) 커밋마다 전체를 요구하는 꼴 '$f' 가 있다"
+  done
+  [ "$(printf '%s\n' "$all" | grep -oF 'rebase -x' | wc -l)" = 1 ] || bad "(d) 'rebase -x' 가 싼 검사 문장 하나에만 있지 않다"
+  # (e) review-brief: 변이의 시험 명령은 그 결정을 지키는 시험으로 좁혀도 되고, 좁히면 이름으로 적는다
+  sec=$(awk '/^`mutate.sh` checks the text/ { f = 1 } f && /^$/ { exit } f' "$rb" | joined)
+  case $sec in *'The test command of a mutation may be narrowed to the tests that guard that decision; if you narrow it, name those tests in your report.'*) ;; *) bad "(e) review-brief 의 mutate.sh 문단에 좁힌 시험 명령 문장이 없다" ;; esac
+  # (f) SKILL.md 7단계: 3항 (a) 는 구현자의 좁힌 실행을 증거로 치지 않고, 5항은 그 주장에 닿는 시험만 돌려도 된다
+  sec=$(awk '/^3\. \*\*시험을 다시 돌린다\*\*/ { f = 1 } /^   - \(b\)/ { f = 0 } f' "$sk" | joined)
+  case $sec in *'구현자의 좁힌 실행은 증거가 아니다.'*) ;; *) bad "(f) 7단계 3항 (a) 에 '구현자의 좁힌 실행은 증거가 아니다.' 가 없다" ;; esac
+  sec=$(awk '/^5\. \*\*주장을 재현한다\*\*/ { f = 1 } /^6\. / { f = 0 } f' "$sk" | joined)
+  case $sec in *'재현과 변이는 그 주장에 닿는 시험만 돌려도 된다.'*) ;; *) bad "(f) 7단계 5항에 '재현과 변이는 그 주장에 닿는 시험만 돌려도 된다.' 가 없다" ;; esac
+  # (g) 5단계 계약서 시험 항목: 커밋별 싼 검사 줄
+  sec=$(awk '/^- \*\*시험\*\*/ { f = 1; print; next } /^- \*\*/ { f = 0 } f' "$sk" | joined)
+  case $sec in *'`커밋별 싼 검사: <명령> 또는 없음` 을 적는다(초 단위 검사만: import, 컴파일, 수집, lint). 안 적으면 없음이다.'*) ;; *) bad "(g) 5단계 시험 항목에 '커밋별 싼 검사' 줄이 없다" ;; esac
+  # (h) sequence 카드: 커밋 보존이면 커밋마다 싼 검사, 최종 SHA 에서 전체
+  sec=$(awk '$0 == "### sequence" { f = 1; next } /^##/ { f = 0 } f' "$dc" | joined)
+  case $sec in *'커밋 보존 병합이면 커밋마다 싼 검사가 초록이고, 최종 SHA 에서 전체가 초록이다.'*) ;; *) bad "(h) sequence 카드에 싼 검사와 최종 전체 문장이 없다" ;; esac
+  case $sec in *'커밋마다 홀로 선다'*) bad "(h) sequence 카드에 '커밋마다 홀로 선다' 가 남아 있다" ;; esac
+}
+
 # ---- 정적 검사 ----
 # 길이 확인 없이 펼친 배열("${a[@]}", ${a[*]}, ${a[@]:1})이 없어야 한다. bash 4.3 이하는 set -u 아래 빈 배열 펼침에서 죽는다.
 # 안전한 꼴: ${a[@]+"${a[@]}"}, ${a[*]+${a[*]}}, ${#a[@]}, ${!a[@]}.
@@ -1905,6 +1954,7 @@ CASES=(
   '지시문, 규율 카드 정적 검사:case_dispatch_prose_static'
   '병합 방식 정적 검사:case_merge_method_static'
   '판단 규칙 정적 검사(숫자 상한 없음):case_judgment_static'
+  '시험 범위 정적 검사(내부 고리 좁게, 최종 전체 한 번):case_test_scope_static'
   'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
   'in-flight 7 6 -> 깨진 claim 이 판정을 막지 않는다:case_flight_broken_claim_file'
   'in-flight --claim -> 임시 파일이 남지 않고 새 파일로 바뀐다:case_flight_claim_atomic'
