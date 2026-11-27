@@ -585,6 +585,13 @@ t_land_loop_conflict() { # rebase 가 충돌하면 되돌리고 충돌 파일을
   printf '%s\n' "$ERR" | grep -qx b || bad "stderr 에 충돌 파일 b 가 한 줄로 없다: $ERR"
   expect_no_temp; expect_pr_branch "$HEAD_SHA"
 }
+t_land_loop_rebase_fails() { # 충돌 없이 rebase 가 지면(prepare-commit-msg 훅이 거절) 충돌이 아닌 이유로 BLOCKED, 임시 worktree 를 남기지 않는다
+  loop_setup; base_commit d d; reject_hook prepare-commit-msg; mkdir "$T/tmp"
+  TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_not "충돌"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"; expect_no_temp
+  case $(printf '%s\n' "$OUT" | tail -1) in "BLOCKED #7 base 를 합치지 못했다: "?*) ;; *) bad "마지막 줄이 base 를 합치지 못했다 이유가 아니다: $OUT" ;; esac
+  expect_err "prepare-commit-msg rejected"
+}
 patch_setup() { # main 에 아홉 줄 파일 p, feat 위에 p 의 1행과 5행을 바꾼 커밋
   loop_setup; base_commit p "$(seq 1 9)"
   ( cd "$T/wt" && git fetch -q origin && git rebase -q origin/main && sed -i -e 1s/1/one/ -e 5s/5/five/ p \
@@ -896,7 +903,7 @@ t_missing_case_fn() {
 
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_gh_transient land_gh_transient_limit land_gh_retry_mergeable land_gh_rounds_arg land_gh_head_modified land_loop_head_modified land_method_squash land_method_explicit land_method_disallowed land_method_merge land_method_unreadable
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
-land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
+land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_rebase_fails land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
 land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
 land_loop_base land_loop_unknown land_loop_base_rewound land_loop_patch_count land_loop_hn_nopush
 land_loop_squash_catchup land_loop_squash_ancestor land_loop_squash_absorbed land_loop_squash_conflict land_loop_squash_retry
