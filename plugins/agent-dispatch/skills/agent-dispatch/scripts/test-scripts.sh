@@ -1540,53 +1540,100 @@ case_judgment_static() { # 상한 문구 부재, 판단 문단의 규칙 문장,
   grep -qF '되돌림, 리뷰 라운드에 세지 않는다' "$dir/references/watching.md" || bad "(e) watching.md 에 사람이 요청한 Fix 는 세지 않는 문장이 없다"
 }
 
-# 시험 범위: 내부 고리는 좁게, 최종 SHA 에서 전체 한 번, 커밋마다 전체는 없다(#80). 규칙 문장은 통째로, 그 절 안에서만 찾는다.
-case_test_scope_static() { # implement-brief Then 3, Follow-up, Report, review-brief 변이, SKILL.md 7단계 3,5항, 5단계 시험 항목, sequence 카드
-  local dir=$SCRIPTS/.. sk ib rb dc f sec all rest
+# 시험 범위: 내부 고리는 좁게, 최종 SHA 에서 전체 한 번, 커밋마다 전체는 없다(#80). 규칙이 든 블록은 통째로 같아야 한다(덧붙인 문장, 불릿이 있으면 진다).
+exact_block() { # <이름> <실제 글> <기대하는 줄>... -- 같지 않으면 bad
+  local what=$1 actual=$2 want
+  shift 2
+  want=$(printf '%s\n' "$@")
+  [ "$actual" = "$want" ] || bad "$what 이 기대한 글과 같지 않다"
+}
+case_test_scope_static() { # implement-brief Then 2, 3, Follow-up, Report 블록, review-brief 변이 문단, SKILL.md 7단계 3(a), 5항, 5단계 시험 항목, sequence 카드
+  local dir=$SCRIPTS/.. sk ib rb dc all rest f
   sk=$dir/SKILL.md ib=$dir/references/implement-brief.md rb=$dir/references/review-brief.md dc=$dir/references/disciplines.md
-  # (a) implement-brief Then: 내부 고리, 최종 실행, 커밋별 싼 검사(커밋 보존일 때만), 전체를 강제하는 경우
-  sec=$(awk '/^\*\*Then:\*\*/ { f = 1 } /^These instructions and the contract/ { f = 0 } f' "$ib" | joined)
-  [ -n "$sec" ] || bad "(a) implement-brief 에 Then 절이 없다"
-  for f in 'Inner loop (while you fix): run only the failing tests and the tests that touch the files you changed (for example the runner'\''s last-failed option, or the test files of the changed modules).' \
-    'Final run: on the exact SHA you push, run the whole test set the contract and repo rules require, once.' \
-    'Never run the whole test set once per commit.' \
-    'Per-commit check: if the contract or repo rules name a cheap per-commit check (seconds: import, compile, collect, lint) and the repo keeps commits when merging (rebase, merge), run only that check on each commit with `git rebase -x`.' \
-    'If the repo squashes, there is no per-commit check.' \
-    'The inner loop runs the whole set too when: a dependency or lock file changed; a test harness or shared fixture changed; the base moved; the contract names no carry-over path for that test; the repo cannot run selected tests.'; do
-    case $sec in *"$f"*) ;; *) bad "(a) implement-brief Then 에 '${f:0:60}...' 문장이 없다" ;; esac
-  done
-  # (b) Follow-up: 좁게 고치고 최종 SHA 에서 전체 한 번, tree 가 같으면 다시 돌리지 않고 SHA 를 적는다, 갈래마다 그 줄을 가리킨다
-  sec=$(awk '/^\*\*Follow-up requests\*\*/ { f = 1 } /^## When to stop/ { f = 0 } f' "$ib" | joined)
-  for f in 'Fix/따라잡기 checks: narrow while you fix, the whole set once on the final SHA, as in Then 3.' \
-    'If `git rev-parse <final SHA>^{tree}` equals the tree of an earlier SHA on which you ran the whole set green, do not rerun it: name that SHA in your report (the orchestrator takes it over with `--carry`).'; do
-    case $sec in *"$f"*) ;; *) bad "(b) implement-brief Follow-up 에 '${f:0:60}...' 문장이 없다" ;; esac
-  done
-  [ "$(printf '%s\n' "$sec" | grep -oF 'run the checks as the Fix/따라잡기 checks bullet says;' | wc -l)" = 2 ] || bad "(b) Follow-up 의 두 갈래가 Fix/따라잡기 checks 줄을 가리키지 않는다"
-  # (c) Report: 최종 실행의 판정 줄과 이어 받은 SHA
-  sec=$(awk '/^## Report/ { f = 1 } f' "$ib" | joined)
-  case $sec in *'For the final run: the verdict line with the full 40-char SHA, as the runner printed it. If you did not rerun because the tree matched, give the SHA whose result you carry over.'*) ;; *) bad "(c) implement-brief Report 에 최종 실행의 판정 줄, 이어 받은 SHA 문장이 없다" ;; esac
-  # (d) 커밋마다 전체 시험을 요구하는 문구가 어느 지시문, SKILL.md 에도 없다. rebase -x 는 싼 검사 문장에만 있다
+  local then_block=(
+    '2. <커밋 보존(rebase, merge)이면> Tidy the history: fold a fix of your own earlier commit into it (`git commit --fixup=<c>`, then `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash $(git merge-base origin/<base> HEAD)`). Never merge. If the contract or repo rules name a cheap per-commit check (seconds: import, compile, collect, lint), run only that check on each commit with `git rebase -x`.'
+    '   <합침(squash)이면> The repo squash-merges, so do not fold fixes: stack each fix as a new commit on top (no `--fixup`, no `rebase -i --autosquash`). The PR title follows the repo'\''s commit convention (for example Conventional Commits): it becomes the commit title on `<base>`. There is no per-commit check.'
+    '3. Run the checks the contract and repo rules require on the exact SHA you push. Never skip hooks. Output from another SHA, a run you have not checked at this SHA, or a helper'\''s summary is not a result, except the equal-tree carry-over under Follow-up requests. A background run of your own counts once its log shows the SHA you push.'
+    '   - Inner loop (while you fix): run only the failing tests and the tests that touch the files you changed (for example the runner'\''s last-failed option, or the test files of the changed modules).'
+    '   - Final run: on the exact SHA you push, run the whole test set the contract and repo rules require, once. Never run the whole test set once per commit.'
+    '   - The inner loop runs the whole set too when: a dependency or lock file changed; a test harness or shared fixture changed; the base moved; the repo cannot run selected tests.'
+  )
+  local follow_block=(
+    '**Follow-up requests** come by message after you report:'
+    '- **Fix** (review findings or a human'\''s PR feedback, each with evidence), **따라잡기** (base moved and your PR conflicts with it, or branch protection requires the branch to be up to date), **Next PR** (an earlier PR of this issue merged).'
+    '- Fix/따라잡기 checks: narrow while you fix, the whole set once on the final SHA, as in Then 3. If `git rev-parse <final SHA>^{tree}` equals the tree of an earlier SHA on which you ran the whole set green, do not rerun it: name that SHA in your report (the orchestrator takes it over with `--carry`).'
+    '- <커밋 보존(rebase, merge)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready; rebase onto `origin/<base>` (never merge), resolving each conflict so both sides survive; fix each item with a test where one can show it; fold fixes into the commit that introduced the problem; run the checks as the Fix/따라잡기 checks bullet says; `git push --force-with-lease`; update the PR body; report what changed (for a rebase: each conflicted file, resolved mechanically or by meaning) and the new SHA.'
+    '- <합침(squash)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready. Fix each item with a test where one can show it, as new commits on top. Merge `origin/<base>` only when it conflicts with your branch or the request says branch protection requires the branch to be up to date; otherwise do not catch up. When you merge, use `git merge origin/<base>` (never rebase), resolving each conflict so both sides survive. Then run the checks as the Fix/따라잡기 checks bullet says; push (never force-push); update the PR body; report what changed (for a merge: each conflicted file, resolved mechanically or by meaning, or that you did not catch up and why) and the new SHA.'
+    '- Next PR: start from the current `origin/<base>` in the same worktree and implement that PR'\''s part of the contract as above.'
+    '- If you were stopped by a usage limit, or woken because you looked stalled, and told to continue: check whether your background runs finished and reuse their results; stop (`TaskStop`) any wait that can never end; rerun only what has none.'
+  )
+  local report_block=(
+    '## Report'
+    ''
+    '- PR URL(s) and the tested SHA; confirm it equals the PR HEAD.'
+    '- Each completion criterion: met and how you checked it, or **not met** and what is missing (partly met is not met).'
+    '- For each check that takes minutes: the log path (in `<scratch>`, outside the worktree) and the verdict line the runner printed with the full 40-char SHA, quoted as printed. Never write or edit a verdict line by hand. Runs meant as evidence happen on a clean tree at the exact SHA you push.'
+    '- For the final run: the verdict line with the full 40-char SHA, as the runner printed it. If you did not rerun because the tree matched, give the SHA whose result you carry over.'
+    '- For each discipline in this brief: `규율 <id> -> <the choice it changed> (file:line)`, or `규율 <id>: 적용 안 함(<reason>)`.'
+    '- Deviations from the contract and why. Out-of-scope bugs with reproductions. `Out-of-scope shapes to reshape: symbol, why`. Boundary notes for sibling issues.'
+    '- Tools made: every script you wrote and every command sequence or setup (env, locks, temp worktrees) you ran by hand, as what / path / times run, or "none". Keep scratch scripts in `<scratch>`, outside the worktree.'
+  )
+  local contract_test=(
+    '- **시험**: 결함은 수정 전 빨강, 수정 후 초록. 구조 변경은 회귀를 무엇이 지키는지. 오래 걸리는 시험마다 **이어 받기'
+    '  허용 경로**(ERE, 7단계 3항 (c))를 적을 수 있다. diff 를 보기 **전에**, 여기서 정한다. 시험이 읽는 집합을 열거하지 말고'
+    '  diff 가 건드려도 결과가 바뀌지 않는 경로를 적는다(과소 선언이 거짓 승인이 되지 않게). 적지 않으면 tree 가 같을 때만'
+    '  이어 받는다. 시험 항목 끝에 `커밋별 싼 검사: <명령> 또는 없음` 을 적는다(초 단위 검사만: import, 컴파일, 수집, lint). 안 적으면 계약서는 없음이다(저장소 규칙이 정한 싼 검사는 그대로 따른다).'
+  )
+  local review_a=(
+    '   - (a) **재실행**: 너나 네가 띄운 서브에이전트가 PR HEAD 에서 다시 돌린 결과.'
+    '     구현자의 좁힌 실행은 증거가 아니다.'
+    '     오래 걸리는 것은 서브에이전트(`haiku`/`max`)에 맡기되'
+    '     로그 파일을 worktree 밖에 남기게 하고 판정 줄을 네가 직접 읽는다. 하위 에이전트의 "통과" 요약만으로 받지 않는다.'
+    '     그 지시에는 기다림 규칙을 넣는다(implement-brief 의 `**Waiting**` 줄을 그대로 옮긴다): 긴 실행은 그 실행 자체를'
+    '     `run_in_background` 로 띄우고 `&`, `nohup`, `setsid`, `( ... & )` 로 떼어 띄우지 않는다. 로그나 다른 task 출력을'
+    '     폴링하는 루프를 쓰지 않는다(꼭 써야 하면 `timeout` 으로 묶고 기다리는 실행이 끝나면 루프도 끝나게 한다). 마지막이'
+    '     아닌 턴을 끝내며 기다릴 때는 무엇을 기다리고 언제 끝날지 그 실행의 로그 경로와 함께 한 줄로 쓴다. 리포트 전에는 띄운'
+    '     백그라운드 실행이 끝나기를 기다리거나 `TaskStop` 하고, 멈춘 것을 리포트에 적어 아무것도 남기지 않는다.'
+  )
+  local review_5=(
+    '5. **주장을 재현한다**: 결과를 좌우하는 주장 하나 이상을 사본에서 직접 재현한다. "수정 전에는 빨강" -> 수정 전 커밋'
+    '   사본에서 그 시험을 돌린다. "이 시험이 이 결정을 지킨다" -> `mutate.sh` 로 그 결정을 깨 KILLED 인지 본다.'
+    '   재현과 변이는 그 주장에 닿는 시험만 돌려도 된다.'
+  )
+  local seq_card=(
+    ''
+    '- **언제**: 여러 PR, sweep, 이주, 비슷한 편집의 반복.'
+    '- **규칙**: 일을 검사로 끝나는 작은 단위로 나눈다. 단위마다 알려진 초록 -> 변경 하나 -> 검사 -> 다음이고, 도구가'
+    '  편집해도 단위 검사를 돌린다. 증명하는 순서로 낸다: 지는 시험 먼저, 빼기 먼저, 기준선 먼저. 커밋 보존 병합이면 커밋마다 싼 검사가 초록이고, 최종 SHA 에서 전체가 초록이다.'
+    '- **자리**: 5단계 PR 나누기와 할 일 순서, 6단계 구현 지시문.'
+    '- **출처**: pstack `principle-sequence-verifiable-units`.'
+  )
+  local mutate_para=(
+    '`mutate.sh` checks the text occurs exactly once, runs the test green first, applies the mutant, runs it again and restores the file: `KILLED rc=N` (exit 0) or `SURVIVED` (exit 1). Keep each mutant syntactically valid, or a syntax error kills it for the wrong reason. Confirm a test runner actually ran tests (count passes), since a runner missing its dependencies can exit quietly. The test command of a mutation may be narrowed to the tests that guard that decision; if you narrow it, name those tests in your report. Write any counterexample test out as text in your report; the implementer runs it.'
+  )
+  # (a) implement-brief: Then 2(커밋 보존의 싼 검사, 합침의 없음)와 Then 3(내부 고리, 최종 실행, 강제 전체 목록)
+  exact_block '(a) implement-brief Then 2, 3' "$(awk '/^2\. <커밋 보존/ { f = 1 } /^4\. Push/ { f = 0 } f' "$ib")" "${then_block[@]}"
+  # (b) Follow-up 목록 전체
+  exact_block '(b) implement-brief Follow-up' "$(awk '/^\*\*Follow-up requests\*\*/ { f = 1 } /^## When to stop/ { f = 0 } f' "$ib")" "${follow_block[@]}"
+  # (c) Report 절 전체
+  exact_block '(c) implement-brief Report' "$(awk '/^## Report/ { f = 1 } f' "$ib")" "${report_block[@]}"
+  # (d) 커밋마다 전체 시험을 요구하는 꼴이 어느 지시문, SKILL.md 에도 없다. rebase -x 는 한 문장에만 있다
   all=$(cat "$sk" "$dir"/references/*.md | joined)
   rest=${all//'Never run the whole test set once per commit.'/}
-  for f in '(each|every|per) commit[^.]{0,60}(whole|full|all) (test|check)' '(whole|full|all) (test|check)[^.]{0,40}(each|every|per) commit' '커밋마다[^.,]{0,12}(전체|전부|모든 시험)' '(전체|전부)[^.,]{0,12}커밋마다' 'rerun the checks'; do
+  for f in '(each|every|per) commit[^.]{0,60}(whole|full|all) (test|check)' '(whole|full|all) (test|check)[^.]{0,40}(each|every|per) commit' '커밋마다[^.,]{0,12}(전체|전부|모든 시험)' '(전체|전부)[^.,]{0,12}커밋마다'; do
     printf '%s\n' "$rest" | grep -qE -- "$f" && bad "(d) 커밋마다 전체를 요구하는 꼴 '$f' 가 있다"
   done
-  [ "$(printf '%s\n' "$all" | grep -oF 'rebase -x' | wc -l)" = 1 ] || bad "(d) 'rebase -x' 가 싼 검사 문장 하나에만 있지 않다"
-  # (e) review-brief: 변이의 시험 명령은 그 결정을 지키는 시험으로 좁혀도 되고, 좁히면 이름으로 적는다
-  sec=$(awk '/^`mutate.sh` checks the text/ { f = 1 } f && /^$/ { exit } f' "$rb" | joined)
-  case $sec in *'The test command of a mutation may be narrowed to the tests that guard that decision; if you narrow it, name those tests in your report.'*) ;; *) bad "(e) review-brief 의 mutate.sh 문단에 좁힌 시험 명령 문장이 없다" ;; esac
-  # (f) SKILL.md 7단계: 3항 (a) 는 구현자의 좁힌 실행을 증거로 치지 않고, 5항은 그 주장에 닿는 시험만 돌려도 된다
-  sec=$(awk '/^3\. \*\*시험을 다시 돌린다\*\*/ { f = 1 } /^   - \(b\)/ { f = 0 } f' "$sk" | joined)
-  case $sec in *'구현자의 좁힌 실행은 증거가 아니다.'*) ;; *) bad "(f) 7단계 3항 (a) 에 '구현자의 좁힌 실행은 증거가 아니다.' 가 없다" ;; esac
-  sec=$(awk '/^5\. \*\*주장을 재현한다\*\*/ { f = 1 } /^6\. / { f = 0 } f' "$sk" | joined)
-  case $sec in *'재현과 변이는 그 주장에 닿는 시험만 돌려도 된다.'*) ;; *) bad "(f) 7단계 5항에 '재현과 변이는 그 주장에 닿는 시험만 돌려도 된다.' 가 없다" ;; esac
-  # (g) 5단계 계약서 시험 항목: 커밋별 싼 검사 줄
-  sec=$(awk '/^- \*\*시험\*\*/ { f = 1; print; next } /^- \*\*/ { f = 0 } f' "$sk" | joined)
-  case $sec in *'`커밋별 싼 검사: <명령> 또는 없음` 을 적는다(초 단위 검사만: import, 컴파일, 수집, lint). 안 적으면 없음이다.'*) ;; *) bad "(g) 5단계 시험 항목에 '커밋별 싼 검사' 줄이 없다" ;; esac
-  # (h) sequence 카드: 커밋 보존이면 커밋마다 싼 검사, 최종 SHA 에서 전체
-  sec=$(awk '$0 == "### sequence" { f = 1; next } /^##/ { f = 0 } f' "$dc" | joined)
-  case $sec in *'커밋 보존 병합이면 커밋마다 싼 검사가 초록이고, 최종 SHA 에서 전체가 초록이다.'*) ;; *) bad "(h) sequence 카드에 싼 검사와 최종 전체 문장이 없다" ;; esac
-  case $sec in *'커밋마다 홀로 선다'*) bad "(h) sequence 카드에 '커밋마다 홀로 선다' 가 남아 있다" ;; esac
+  printf '%s\n' "$all" | grep -qiE 're-?run the checks' && bad "(d) 're-?run the checks' 가 남아 있다"
+  [ "$(printf '%s\n' "$all" | grep -oF 'rebase -x' | wc -l)" = 1 ] || bad "(d) 'rebase -x' 가 한 문장에만 있지 않다"
+  # (e) review-brief: 변이 문단 전체
+  exact_block '(e) review-brief mutate.sh 문단' "$(awk '/^`mutate.sh` checks the text/ { f = 1 } /^Never write to the PR/ { f = 0 } f' "$rb")" "${mutate_para[@]}"
+  # (f) SKILL.md 7단계: 3항 (a) 불릿 전체, 5항 전체
+  exact_block '(f) 7단계 3항 (a)' "$(awk '/^   - \(a\) \*\*재실행/ { f = 1 } /^   - \(b\)/ { f = 0 } f' "$sk")" "${review_a[@]}"
+  exact_block '(f) 7단계 5항' "$(awk '/^5\. \*\*주장을 재현한다\*\*/ { f = 1 } /^6\. / { f = 0 } f' "$sk")" "${review_5[@]}"
+  # (g) 5단계 계약서 시험 항목 전체
+  exact_block '(g) 5단계 시험 항목' "$(awk '/^- \*\*시험\*\*/ { f = 1 } /^- \*\*PR\*\*/ { f = 0 } f' "$sk")" "${contract_test[@]}"
+  # (h) sequence 카드 전체
+  exact_block '(h) sequence 카드' "$(awk '$0 == "### sequence" { f = 1; next } /^### measure/ { f = 0 } f' "$dc")" "${seq_card[@]}"
 }
 
 # ---- 정적 검사 ----
