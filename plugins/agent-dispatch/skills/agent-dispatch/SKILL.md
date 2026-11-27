@@ -45,7 +45,7 @@ description: >-
 ## 실행 전반의 원칙
 
 - **한 번에 이슈 하나**(기본): 한 이슈를 착륙까지 가져간 뒤 다음 이슈의 구현을 보낸다. 넣자마자 base 가 바뀌므로 겹치는
-  PR 의 rebase 와 재검수가 생기지 않고, 사용 한도에도 덜 걸린다. 사람이 병렬을 허락하면 계약서가 바꾸는 파일이 겹치지
+  PR 의 따라잡기와 재검수가 생기지 않고, 사용 한도에도 덜 걸린다. 사람이 병렬을 허락하면 계약서가 바꾸는 파일이 겹치지
   않는 이슈만 함께 보낸다. grilling(읽기만 한다)은 frontier 전체를 함께 보내도 된다.
 - **놀지 않는다**: 서브에이전트를 기다리는 동안 그 결과에 기대지 않는 일(다음 이슈의 계약, 이슈 등록, 정리)을 한다.
   "결과가 오면 알리겠다"로 턴을 끝내는 것은 남은 일이 정말 전부 그 결과에 걸려 있을 때뿐이고, 무엇이 걸렸는지 한 줄로
@@ -164,8 +164,16 @@ bash "${CLAUDE_SKILL_DIR}/scripts/in-flight.sh" --where
 - **base**: 규칙이 정한 브랜치, 아니면 기본 브랜치.
 - **착륙**: 규칙이 정한 착륙 명령이 하나로 묶여 있으면 그것(`land.sh --via '<명령>'`), 검사와 병합 전 단계로 나뉘어 있으면
   저장소 명령(`--check '<검사 명령>'`, `--pre-merge '<병합 전 명령>'`, push 에만 줄 env 가 있으면 `--push-env K=V`)으로 준다.
-  저장소 명령이 있으면 `land.sh` 가 base 위로 rebase 하고 base 가 움직이면 다시 한다. 둘 다 없으면 gh 병합(저장소가 허용한
-  방식, rebase 우선. `Base branch was modified` 로 지면 `LAND_ROUNDS` 번까지 같은 HEAD 로 다시 한다). 착륙 명령이 PR 본문을 고쳐 쓰는지, draft 를 거부하는지, 커밋 메시지에서 `Closes` 를 모으는지 읽어 둔다.
+  저장소 명령이 있으면 `land.sh` 가 base 위로 rebase 하고 base 가 움직이면 다시 한다. 둘 다 없으면 gh 병합(아래 **병합**
+  방식. `Base branch was modified` 로 지면 `LAND_ROUNDS` 번까지 같은 HEAD 로 다시 한다). 착륙 명령이 PR 본문을 고쳐 쓰는지, draft 를 거부하는지, 커밋 메시지에서 `Closes` 를 모으는지 읽어 둔다.
+- **병합**: `rebase`, `squash`, `merge` 가운데 하나. 출처 우선순위는 실행 인자 > 저장소 규칙(`CLAUDE.md`/`AGENTS.md`) >
+  사용자 상시 선호(전역 `CLAUDE.md`, 메모리) > GitHub 설정(허용된 것 가운데 rebase > squash > merge)이다. 설정은
+  `gh repo view <o>/<r> --json rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed` 로 읽는다. 정한 방식을 설정이
+  허용하지 않으면 쓰기 전에 `AskUserQuestion` 으로 묻는다(조용히 바꾸지 않는다). `--via` 면 방식은 규칙이 정하고, 없으면
+  rebase 로 본다. 방식은 둘로 가른다. **커밋 보존**(rebase, merge)은 커밋을 정리해 다시 쓰고 rebase 로 따라잡는다(지금까지의
+  동작). **합침**(squash)은 커밋을 위에 쌓고, base 와 충돌하거나 보호 규칙이 최신을 요구할 때만 `git merge origin/<base>` 로
+  따라잡고 force-push 하지 않는다. 이 값 하나를 구현 지시문(6단계), 리뷰 지시문과 재리뷰(7단계), `pr-check.sh --closes-body`
+  (7단계 1항), `land.sh --method`(8단계)가 읽는다.
 - **모양 규칙**: 규칙이 막는 커밋 trailer, 브랜치에서 고치면 안 되는 경로(버전, CHANGELOG 등)를 `pr-check.sh` 의
   `--forbid-trailer`/`--forbid-path` 로 옮긴다. **판정 무관 경로**(어떤 시험도 읽지 않는 경로: version 파일, CHANGELOG
   등)를 ERE 목록으로 정한다. 7단계 "걸림"의 재리뷰 예외 (ii) 가 `--may-touch` 로 쓴다. 시험이 읽는 문서(SKILL.md 를 읽는
@@ -204,7 +212,7 @@ bash "${CLAUDE_SKILL_DIR}/scripts/frontier.sh" --repo <owner>/<repo> (--map <M> 
 | 사람 몫 | 사내망, 실기기, 계정, 사람의 판단이 있어야 끝난다 | `ready-for-human`, 구현하지 않는다 |
 
 맡는 이슈는 **진행 목록**에 넣고 `in-flight.sh --claim` 한다. 진행 목록은 이 실행이 손대는 이슈마다 단계(`grilling`,
-`사람 답`, `구현 대기`, `구현`, `검수`, `수정`, `rebase`, `다음 PR 대기`, `사람 병합 대기`), agent id, worktree, PR, 상한
+`사람 답`, `구현 대기`, `구현`, `검수`, `수정`, `따라잡기`, `다음 PR 대기`, `사람 병합 대기`), agent id, worktree, PR, 상한
 값을 적는다. 닫히거나 사람에게 넘기거나 범위에서 빼면 진행 목록에서 빼고 `--release` 한다.
 
 **기다림에는 깨울 사건이 있어야 한다**: 이슈 X 가 열린 이슈 K 를 기다리면, K 가 진행 목록에 있을 때만 X 의 줄에 "#K 를
@@ -288,8 +296,9 @@ grilling 갈래의 이슈마다 읽기만 하는 서브에이전트를 백그라
   허용 경로**(ERE, 7단계 3항 (c))를 적을 수 있다. diff 를 보기 **전에**, 여기서 정한다. 시험이 읽는 집합을 열거하지 말고
   diff 가 건드려도 결과가 바뀌지 않는 경로를 적는다(과소 선언이 거짓 승인이 되지 않게). 적지 않으면 tree 가 같을 때만
   이어 받는다.
-- **PR**: 개수(여럿이면 stacked), draft, **`Closes #N` 은 마지막 PR 의 마지막 커밋 메시지에도**(착륙 명령이 본문을 고쳐
-  써도 닫히게), 버전, CHANGELOG, 본문 규칙.
+- **PR**: 개수(여럿이면 stacked), draft, `Closes #N` 의 자리, 버전, CHANGELOG, 본문 규칙. `Closes #N` 은 0단계 `병합` 이
+  커밋 보존이거나 `착륙` 이 `--via` 면 **마지막 PR 의 마지막 커밋 메시지에도**(착륙 명령이 본문을 고쳐 써도 닫히게), 합침(squash)이고
+  `--via` 가 아니면 **마지막 PR 의 본문에** 둔다. 합침이면 PR 제목이 base 에 남는 커밋 제목이니 저장소 커밋 규칙을 따른다.
 - **`규율:`**: 카드 id 마다 그 이슈에서의 뜻 한 줄. 등급 상한은 가벼움 0장 / 보통 1장 이하 / 무거움 이상 3장
   이하다. 카드는 근거이지 결정이 아니다(3단계 분류를 바꾸지 않는다).
 - **완료 기준**: 하나씩 확인할 수 있는 것. **범위 밖**과 **경계**.
@@ -309,7 +318,7 @@ grilling 갈래의 이슈마다 읽기만 하는 서브에이전트를 백그라
 `scratch <경로>` 로 적는다. 로그, 임시 스크립트, 사본은 그 안에 남는다. 감시의 `--path` 에는 그 이슈의 worktree 와 이
 scratch 를 준다("서브에이전트의 알림과 감시"). 이어 하기로 새로 띄울 때도 같은 scratch 를 넘긴다.
 
-**이어 하기**: 이미 PR, worktree 가 있는 이슈는 그 서브에이전트에게 `SendMessage` 로 후속 요청(Fix, Rebase, Next PR)을
+**이어 하기**: 이미 PR, worktree 가 있는 이슈는 그 서브에이전트에게 `SendMessage` 로 후속 요청(Fix, 따라잡기, Next PR)을
 보낸다. 새로 띄우는 것은 원래 서브에이전트가 없거나 등급을 올려야 할 때뿐이고, 그때 지시문의 이어 하기 줄을 채워 두 번째
 worktree, PR 이 생기지 않게 한다.
 
@@ -324,15 +333,16 @@ worktree, PR 이 생기지 않게 한다.
 1. **모양**:
    ```sh
    bash "${CLAUDE_SKILL_DIR}/scripts/pr-check.sh" --repo <o>/<r> --pr <P> --worktree <wt> --sha <보고한 SHA> \
-     --closes <N> --draft [--base <앞 층 브랜치>] [--forbid-trailer '<ERE>']... [--forbid-path '<ERE>']... \
+     --closes <N> [--closes-body] --draft [--base <앞 층 브랜치>] [--forbid-trailer '<ERE>']... [--forbid-path '<ERE>']... \
      [--verdict '<로그>=<글자>']... [--carry <sha> [--may-touch '<ERE>']...]...
    ```
-   `SHAPE FAIL` 이면 리뷰어를 띄우지 않고 그것부터 Fix/Rebase 로 돌려보낸다. stacked PR 의 아래층은 `--closes` 를 빼고
+   `--closes-body` 는 0단계 `병합` 이 squash 이고 `착륙` 이 `--via` 가 아닐 때 준다(`Closes #N` 을 PR 본문에서 찾는다).
+   `SHAPE FAIL` 이면 리뷰어를 띄우지 않고 그것부터 Fix/따라잡기로 돌려보낸다. stacked PR 의 아래층은 `--closes` 를 빼고
    위층은 `--base <앞 층 브랜치>` 를 준다. 검수 중인 PR 은 늘 draft 다(`--draft`). 8단계의 `land.sh` 가 ready 로 바꾼 뒤
    `BLOCKED` 로 돌아온 PR 이면 `gh pr ready --undo` 로 되돌리고 돈다.
 2. **리뷰어를 띄운다**(`SHAPE OK` 직후, 이 PR 에 아직 리뷰가 없을 때): [`references/review-brief.md`](references/review-brief.md)
    를 채워 백그라운드로. 스택이면 스택 전체를 한 리뷰로 본다. 진행 목록에 `리뷰한 SHA` 와 리뷰어 id 를 적는다. Fix,
-   Rebase 뒤의 재리뷰는 아래 "걸림" 문단대로 한다.
+   따라잡기 뒤의 재리뷰는 아래 "걸림" 문단대로 한다.
 3. **시험을 다시 돌린다**(리뷰어와 나란히): 계약서의 시험마다 PR HEAD 의 증거가 다음 셋 가운데 하나여야 한다. 셋 다
    아니면 다시 돌린다. 리포트의 숫자를 옮겨 적지 않는다.
    - (a) **재실행**: 너나 네가 띄운 서브에이전트가 PR HEAD 에서 다시 돌린 결과. 오래 걸리는 것은 서브에이전트(`haiku`/`max`)에 맡기되
@@ -374,7 +384,7 @@ worktree, PR 이 생기지 않게 한다.
 받아들인 계약 안의 `blocker`/`major` 가 없다 / 완료 기준이 채워졌다(보정한 것은 댓글이 있다) / 계약 대조와 재현이
 맞다. 깨끗하면 8단계로 간다.
 
-**걸림**: 1~7의 걸린 것을 모두 모아 Fix 를 **한 번에** 보낸다(단계 `수정`). 고쳐 오면 1항부터 다시 한다. Fix 결과가 새 결함을 들였다고 판정되면(등급 절) 다음 Fix 는 한 칸 올려 다시 보낸다(등급 절의 올림 한 번 규칙대로). Fix 나 Rebase
+**걸림**: 1~7의 걸린 것을 모두 모아 Fix 를 **한 번에** 보낸다(단계 `수정`). 고쳐 오면 1항부터 다시 한다. Fix 결과가 새 결함을 들였다고 판정되면(등급 절) 다음 Fix 는 한 칸 올려 다시 보낸다(등급 절의 올림 한 번 규칙대로). Fix 나 따라잡기
 뒤에는 **기본이 재리뷰다**(사용자 결정 2026-11-24). 다음 닫힌 예외에 들 때만 기계 재검사(1, 3, 4항과, 리뷰가 살아남았다고
 한 변이를 `mutate.sh` 로 다시)로 끝낸다. 너의 "뜻이 안 바뀌었다"는 판단은 예외가 아니다. 파일 종류로도 가르지 않는다.
 시험 파일, fixture, 시험이 읽는 문서(SKILL.md 를 읽는 정적 검사 등)가 바뀐 Fix 는 모두 재리뷰한다.
@@ -383,13 +393,21 @@ worktree, PR 이 생기지 않게 한다.
   비어 있다.
 - (ii) `리뷰한 SHA` 이후 diff 의 경로가 모두 0단계의 판정 무관 경로에 맞는다. 1항에 `--carry <리뷰한 SHA> --may-touch
   '<판정 무관 ERE>'...` 를 더해 `EVIDENCE OK carry#<k> ...` 가 나와야 한다.
-- (iii) 구현자가 충돌 없이, 또는 기계적으로 풀었다고 보고한 Rebase 로, 패치가 같다: `git log -p -U0 --reverse <mb>..<리뷰한 SHA>
-  | git patch-id --stable` 과 `git log -p -U0 --reverse <mb'>..HEAD | git patch-id --stable` 의 patch-id 열 목록(순서, 개수 포함)이
-  같다(`<mb>` 는 `git merge-base <리뷰한 SHA> origin/<base>`, `<mb'>` 는 `git merge-base HEAD origin/<base>`). 범위에 merge 커밋이
-  있거나 한쪽이 비면 예외가 아니다. `land.sh` 의 패치 판정과 같은 명령이다.
+- (iii) 구현자가 충돌 없이, 또는 기계적으로 풀었다고 보고한 따라잡기로, 패치가 같다. 명령은 0단계 `병합` 으로 갈린다.
+  - 커밋 보존: `git log -p -U0 --reverse <mb>..<리뷰한 SHA> | git patch-id --stable` 과
+    `git log -p -U0 --reverse <mb'>..HEAD | git patch-id --stable` 의 patch-id 열 목록(순서, 개수 포함)이 같다(`<mb>` 는
+    `git merge-base <리뷰한 SHA> origin/<base>`, `<mb'>` 는 `git merge-base HEAD origin/<base>`). 범위에 merge 커밋이 있거나
+    한쪽이 비면 예외가 아니다. `land.sh` 의 패치 판정과 같은 명령이다.
+  - 합침(squash): PR 고유 diff 의 patch-id 가 같다:
+    `git diff -U0 $(git merge-base <리뷰한 SHA> origin/<base>) <리뷰한 SHA> | git patch-id --stable` 과
+    `git diff -U0 $(git merge-base HEAD origin/<base>) HEAD | git patch-id --stable` 의 patch-id 열이 같다. 따라잡기 merge 커밋이
+    범위에 있어도 된다. 한쪽이 비면 예외가 아니다.
 
-재리뷰는 1항 `SHAPE OK` 직후(예외 (ii) 는 1항의 `--carry` 로, (i) 은 `rev-parse`, (iii) 은 patch-id 목록 비교로 직접) 3, 4항과 **나란히** 띄운다(새
-직렬 단계가 아니다). 대상은 `리뷰한 SHA` 이후의 diff 다(base 가 움직였으면 `git range-diff`). 크기는 첫 리뷰 열보다 한 칸
+재리뷰는 1항 `SHAPE OK` 직후(예외 (ii) 는 1항의 `--carry` 로, (i) 은 `rev-parse`, (iii) 은 patch-id 비교로 직접) 3, 4항과 **나란히** 띄운다(새
+직렬 단계가 아니다). 대상은 커밋 보존이면 `리뷰한 SHA` 이후의 diff 다(base 가 움직였으면 `git range-diff`). 합침(squash)이면
+`git diff <리뷰한 SHA>..HEAD` 가 아니라(따라잡기 merge 뒤에는 형제 PR 의 파일까지 끌어온다) PR 고유 diff 둘
+(`git diff $(git merge-base <리뷰한 SHA> origin/<base>) <리뷰한 SHA>` 와 `git diff $(git merge-base HEAD origin/<base>) HEAD`)의
+비교다(review-brief 의 재리뷰 줄). 크기는 첫 리뷰 열보다 한 칸
 아래, 하한 `sonnet`/`high`. 가벼움 PR 은 처음부터 리뷰가 없으니 재리뷰도 없다. 리뷰는 한 PR 에 두 라운드, 되돌림은 두
 번까지다. 넘으면 "한 칸 올려 다시 보낸다", "사람에게 넘긴다"를 따른다.
 
@@ -402,10 +420,11 @@ worktree, PR 이 생기지 않게 한다.
 2. 넣는다. 스택이면 마지막 층만 넣는다.
    ```sh
    bash "${CLAUDE_SKILL_DIR}/scripts/land.sh" --repo <o>/<r> --pr <P> --sha <검수한 PR HEAD> --issue <N> \
-     --evidence <기록 파일> [--via '<착륙 명령>'] [--base <base> --close-stack <앞 층 PR,...>] [--keep] \
+     --evidence <기록 파일> (--method <0단계 병합> | --via '<착륙 명령>') [--base <base> --close-stack <앞 층 PR,...>] [--keep] \
      [--check '<검사 명령>'] [--pre-merge '<병합 전 명령>'] [--push-env K=V]...
    ```
    `--via` 와 저장소 명령(`--check`, `--pre-merge`, `--push-env`)은 함께 주지 않는다. 0단계 `착륙` 에 적은 쪽을 준다.
+   `--method` 는 언제나 0단계 `병합` 값을 준다(`land.sh` 의 기본인 설정 순서에 맡기지 않는다). `--via` 면 빼고 착륙 명령이 넣는다.
    `<검수한 PR HEAD>` 는 7단계를 마지막으로 1항부터 돌았을 때 확인한 PR HEAD 다(리뷰가 없었던 가벼움 PR, 예외로 끝낸 Fix
    포함). 진행 목록의 `검수한 SHA` 다.
    `--keep` 은 계약서에 다음 PR 이 남았을 때다. 권한 설정이 이 명령을 막으면 사람에게 허용 규칙(예:
@@ -418,19 +437,20 @@ worktree, PR 이 생기지 않게 한다.
 | `LANDED ... ISSUE #N OPEN` | 계약서에 다음 PR 이 남았으면 단계 `다음 PR 대기`, Next PR 요청(되돌림, 리뷰 라운드는 0 으로). 남은 PR 이 없으면 완료 기준을 확인해 닫거나 이유를 적는다 |
 | `BLOCKED ... PR HEAD 가 검수한 SHA 와 다르다` | 검수 뒤 누가 push 했다. 7단계 1항부터 새 HEAD 로. 단 그 HEAD 가 앞 `land.sh` 실행의 stderr 에 `land: 올린 tip <그 HEAD 40자>` 로 나온 것이면(복원 실패, kill 로 죽은 실행) 그 실행의 `--push-env` 를 함께 주어 `env K=V... git push --force-with-lease=refs/heads/<branch>:<그 HEAD> <remote> <검수한 SHA>:refs/heads/<branch>` 로 되돌리고 같은 `--sha` 로 다시 부른다 |
 | `BLOCKED ... PR 이 열려 있지 않다(MERGED)` | 병합 뒤 정리 전에 끝났다. `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리하고 `LANDED` 처리를 한다. `(CLOSED)` 면 누가 닫았으니 사람에게 넘긴다 |
-| `BLOCKED ... base 와 충돌한다 -- rebase 가 필요하다` | Rebase 요청(단계 `rebase`). 충돌 파일은 stderr 에 있다. 돌아오면 7단계 |
-| `BLOCKED ... rebase 가 패치를 바꿨다` | Rebase 요청(단계 `rebase`). 돌아오면 7단계(재리뷰가 기본) |
+| `BLOCKED ... 저장소가 <방식> 병합을 허용하지 않는다` | `--method` 로 준 방식을 저장소 설정이 막았다. 기록, 대상 변경, push, ready 전에 멈췄으니 PR 은 draft 그대로다. 0단계 `병합` 방식을 고치거나(규칙과 설정을 다시 읽는다) `AskUserQuestion` 으로 사람에게 묻고, 정한 방식으로 다시 부른다 |
+| `BLOCKED ... base 와 충돌한다 -- 따라잡기가 필요하다` | 따라잡기 요청(단계 `따라잡기`). 충돌 파일은 stderr 에 있다. 돌아오면 7단계 |
+| `BLOCKED ... rebase 가 패치를 바꿨다` | 따라잡기 요청(단계 `따라잡기`). 돌아오면 7단계(재리뷰가 기본). 0단계 `병합` 이 squash 이고 저장소 명령(`--check`, `--pre-merge`)으로 넣으면 따라잡기 merge 가 이 판정을 되풀이하니 사람에게 넘기고, 고리 모드의 squash 지원은 후속 이슈로 낸다(1단계) |
 | `BLOCKED ... 검사 실패: <cmd>` | stderr 의 출력을 읽고 Fix(단계 `수정`). PR 은 draft 로 남아 있다 |
 | `BLOCKED ... 병합 전 명령이 실패했다: <cmd>` | stderr 의 출력을 읽는다. 저장소 쪽 일시 오류면 한 번 더, PR 탓이면 Fix(단계 `수정`) |
 | `BLOCKED ... base 가 움직여 <N>번 다시 했다` | 저장소 명령으로 넣을 때도, gh 로 넣을 때도 나온다. 한 번 더 부른다. 또 그러면 사람에게 넘긴다 |
 | `BLOCKED ... PR HEAD 가 병합 직전에 바뀌었다` | 검수 뒤 HEAD 가 바뀌었다(사람 승인이 아니다). 7단계 1항부터 새 HEAD 로 검수한다. 저장소 명령으로 넣었는데 stderr 에 `되돌리지 못했다` 가 있으면, 남이 올린 HEAD 를 덮지 않은 것이다 |
 | `BLOCKED ... PR 브랜치에 push 하지 못했다` | PR HEAD 를 본다. 검수한 SHA 도, stderr 의 `land: 올린 tip` 도 아니면 lease 가 막은 것(검수 뒤 남이 push 했다)이니 `검수한 SHA 와 다르다` 와 같이 한다. 그대로면 원격 오류이니 한 번 더 부르고, 또 그러면 stderr 를 읽고 처리한다 |
 | `BLOCKED ... PR HEAD 가 올린 tip <sha> 이 되지 않았다` | GitHub 반영이 늦었거나 남이 push 했다. 한 번 더 부르고, `검수한 SHA 와 다르다` 가 나오면 그 행대로 한다 |
-| `BLOCKED ... PR 을 읽지 못했다`, `검증 기록을 #<N> 에 남기지 못했다`, `대상 브랜치를 <b> 로 바꾸지 못했다`, `base <b> 를 받지 못했다`, `임시 worktree 를 만들지 못했다`, `임시 디렉터리를 만들지 못했다`, `mergeable 이 끝내 UNKNOWN 이다`, `ready 로 바꾸지 못했다`, `저장소의 병합 방식을 읽지 못했다`, `gh pr merge 실패: <오류>` | 일시 오류이거나 GitHub 반영이 늦을 수 있다. PR 브랜치는 검수한 SHA 다(저장소 명령으로 넣었으면 `land.sh` 가 올린 tip 을 되돌렸다. 되돌리지 못했으면 stderr 에 그렇게 나오고 다음 실행이 `검수한 SHA 와 다르다` 로 멈춘다). 같은 명령으로 한 번 더 부르고, 또 그러면 stderr 와 오류 줄을 읽는다: PR 탓이면 Fix(단계 `수정`)나 Rebase, 네트워크, 디스크, 권한, 저장소 설정처럼 네가 풀 수 없으면 사람에게 넘긴다 |
+| `BLOCKED ... PR 을 읽지 못했다`, `검증 기록을 #<N> 에 남기지 못했다`, `대상 브랜치를 <b> 로 바꾸지 못했다`, `base <b> 를 받지 못했다`, `임시 worktree 를 만들지 못했다`, `임시 디렉터리를 만들지 못했다`, `mergeable 이 끝내 UNKNOWN 이다`, `ready 로 바꾸지 못했다`, `저장소의 병합 방식을 읽지 못했다`, `gh pr merge 실패: <오류>` | 일시 오류이거나 GitHub 반영이 늦을 수 있다. PR 브랜치는 검수한 SHA 다(저장소 명령으로 넣었으면 `land.sh` 가 올린 tip 을 되돌렸다. 되돌리지 못했으면 stderr 에 그렇게 나오고 다음 실행이 `검수한 SHA 와 다르다` 로 멈춘다). 같은 명령으로 한 번 더 부르고, 또 그러면 stderr 와 오류 줄을 읽는다: PR 탓이면 Fix(단계 `수정`)나 따라잡기, 네트워크, 디스크, 권한, 저장소 설정처럼 네가 풀 수 없으면 사람에게 넘긴다 |
 | `BLOCKED ... gh pr merge 뒤에도 <state> 다`, `착륙 명령은 끝났는데 PR 이 <state> 다` | 병합 호출(착륙 명령)은 끝났는데 아직 MERGED 가 아니다(병합 큐, 반영 지연). `land.sh` 를 같은 `--sha` 로 다시 부르거나 PR 브랜치를 되돌리지 않는다(저장소 명령으로 넣어 push 했으면, 곧 stderr 에 `land: 올린 tip` 줄이 있으면 PR HEAD 는 그 tip 이고, 그 줄이 없으면 검수한 SHA 그대로다). 착륙 명령이면 그 출력을 읽는다. `NEEDS_HUMAN` 처럼 9단계로 지켜보고, MERGED 가 되면 `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>`, 닫히거나 큐에서 빠지면 사람에게 넘긴다 |
 | `BLOCKED ... --via 를 돌릴 <branch> 의 worktree 가 없다` | PR 브랜치를 체크아웃한 worktree 가 없다. `git worktree add <경로> <branch>` 로 만들고 같은 명령으로 다시 부른다 |
 | `BLOCKED ... 병합되지 않았다(<state>) -- 정리하지 않는다` | `--cleanup` 을 병합 전에 불렀다. 9단계 지켜보기를 이어 가 MERGED 가 된 뒤 다시 부른다 |
-| `BLOCKED ... 착륙 명령이 실패했다` | 그 출력을 읽는다. 저장소 검사 실패면 Fix, rebase 충돌이면 Rebase, base 가 움직여 다시 하면 되는 것이면 한 번 더 |
+| `BLOCKED ... 착륙 명령이 실패했다` | 그 출력을 읽는다. 저장소 검사 실패면 Fix, 충돌이면 따라잡기, base 가 움직여 다시 하면 되는 것이면 한 번 더 |
 | `NEEDS_HUMAN #P ...` | 보호 규칙이 사람의 승인을 요구한다. 단계 `사람 병합 대기`, 9단계로 지켜본다. 저장소 명령으로 넣어 push 했으면(stderr 에 `land: 올린 tip` 줄이 있으면) PR HEAD 는 검수한 SHA 가 아니라 그 tip(사람이 넣을 rebase 와 병합 전 커밋)으로 남는다. 그때는 옛 `--sha` 로 `land.sh` 를 다시 부르지 않는다(`검수한 SHA 와 다르다` 로 멈추고, 그 행의 손 복원이 사람이 넣을 판을 지운다). 그 줄이 없으면(base 가 이미 조상이고 병합 전 커밋이 없었으면) 올린 것이 없어 PR HEAD 는 검수한 SHA 그대로다. 사람이 넣으면 `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리한다 |
 
 넣은 뒤 진행 중인 다른 PR(병렬로 돌린 경우)이 같은 파일, 계약에 닿으면 사본에서 새 base 위로 올려 시험을 다시 돌리고,
@@ -461,7 +481,7 @@ BUSY 와 세션 이름, `사람 병합 대기 PR #N`), 범위 밖 이유 가운�
 
 ```
 위치 <VERDICT>, <답|해당 없음>
-범위 <지도 #M | 질의 "q">, 담당 <me|조건>, base <b>, 착륙 <--via '<명령>' | gh <방식>[ --check '<명령>'][ --pre-merge '<명령>'][ --push-env K=V]...>, 라벨 <셋>, 모양 <forbid 목록, 판정 무관 ERE>, 사본 <link/copy 목록>, 원칙 <한 줄>
+범위 <지도 #M | 질의 "q">, 담당 <me|조건>, base <b>, 착륙 <--via '<명령>' | gh[ --check '<명령>'][ --pre-merge '<명령>'][ --push-env K=V]...>, 병합 <rebase|squash|merge>, 라벨 <셋>, 모양 <forbid 목록, 판정 무관 ERE>, 사본 <link/copy 목록>, 원칙 <한 줄>
 처리한 착륙: #<PR>(#<이슈>[, 범위 밖 버그][, 유발 #<n>]) ...
 범위 밖으로 낸 이슈(즉시 진행 불가 버그, 버그 아닌 이슈): #<n> <이유> | 없음
 공용화 후보: <손 절차> x<횟수> -> <도구 이슈 #n | 기존 도구 확장 | 일회용> | 없음

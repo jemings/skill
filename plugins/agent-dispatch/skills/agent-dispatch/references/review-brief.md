@@ -3,7 +3,8 @@
 SKILL.md 7단계 2항에서 오케스트레이터가 채워 백그라운드로 띄운다. 그동안 기계 검사를 한다.
 
 `<...>` 를 채운다. 이 파일을 가리키지 말고 내용을 지시문에 그대로 넣는다. `<scripts>` 는 이 스킬의 `scripts/` 절대 경로,
-`<사본 옵션>` 은 0단계에서 정한 `temp-tree.sh` 의 `--link`/`--copy` 목록이다.
+`<사본 옵션>` 은 0단계에서 정한 `temp-tree.sh` 의 `--link`/`--copy` 목록이다. 재리뷰 줄의 병합 갈래(커밋 보존, 합침)는 0단계
+`병합` 값에 맞는 쪽 하나만 남긴다.
 
 재리뷰(SKILL.md 7단계 "걸림")면 `<결정 -> 지키는 시험 목록>` 을 Fix 가 새로 쓰거나 바꾼 시험과 그것이 지키는 결정으로
 다시 채운다. 첫 리뷰의 목록을 그대로 넣지 않는다.
@@ -20,7 +21,7 @@ You are an **adversarial reviewer** for issue **#<N>** of `<owner>/<repo>`. Your
   - `git diff $(git merge-base origin/<base> HEAD)`: commits plus uncommitted edits to tracked files.
   - `git status --porcelain`: read every untracked (`??`) file in full. `git diff` does not show them.
   - `git log --format='%h %s%n%b' $(git merge-base origin/<base> HEAD)..HEAD`.
-- **Re-review only**: <재리뷰면 남긴다: Review only what changed since the last review, at `<마지막으로 리뷰한 SHA>`. `<SHA>` above is always the current PR HEAD; the old SHA belongs only in this line. If `git merge-base origin/<base> <마지막으로 리뷰한 SHA>` equals `git merge-base origin/<base> HEAD`, replace the first `git diff` above with `git diff <마지막으로 리뷰한 SHA> HEAD`. If they differ, the base moved and that diff would mix in sibling PRs, so use `git range-diff $(git merge-base origin/<base> <마지막으로 리뷰한 SHA>)..<마지막으로 리뷰한 SHA> $(git merge-base origin/<base> HEAD)..HEAD` instead. Read earlier code only as far as the change needs.>
+- **Re-review only**: <재리뷰면 남긴다: Review only what changed since the last review, at `<마지막으로 리뷰한 SHA>`. `<SHA>` above is always the current PR HEAD; the old SHA belongs only in this line. <커밋 보존(rebase, merge)이면: If `git merge-base origin/<base> <마지막으로 리뷰한 SHA>` equals `git merge-base origin/<base> HEAD`, replace the first `git diff` above with `git diff <마지막으로 리뷰한 SHA> HEAD`. If they differ, the base moved and that diff would mix in sibling PRs, so use `git range-diff $(git merge-base origin/<base> <마지막으로 리뷰한 SHA>)..<마지막으로 리뷰한 SHA> $(git merge-base origin/<base> HEAD)..HEAD` instead.><합침(squash)이면: The branch may have merged `origin/<base>` to catch up, so `git diff <마지막으로 리뷰한 SHA> HEAD` would mix in sibling PRs. Compare the PR's own diffs instead: `git diff $(git merge-base <마지막으로 리뷰한 SHA> origin/<base>) <마지막으로 리뷰한 SHA>` and `git diff $(git merge-base HEAD origin/<base>) HEAD` (for example, diff the two outputs), and review what differs, including how a catch-up merge resolved conflicts.> Read earlier code only as far as the change needs.>
 - **Repo rules**: `<저장소 규칙 파일들, 예: CLAUDE.md, AGENTS.md, 하위 디렉터리 AGENTS.md>`.
 - **Tests**: `<계약서의 시험 명령들>`.
 

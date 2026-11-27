@@ -105,7 +105,7 @@ id 와 그 이슈에서의 뜻을 적는다. 6단계에서 카드의 **언제**,
 | `interrogate` | 다른 벤더를 전제하고 적대적 리뷰와 겹친다 |
 | `unslop`, `technical-writing` | 산문 전용이다. PR 본문은 저장소 규칙을 따른다 |
 | `no-comments` | 주석 전부 삭제는 하지 않는다. 스크립트 머리 주석은 `-h` 의 정본이고 공개 계약이다 |
-| poteto-mode 의 shipping, babysit, autopilot | squash 병합을 전제해 `land.sh` 와 부딪힌다 |
+| poteto-mode 의 shipping, babysit, autopilot | poteto-mode 가 PR 을 직접 병합해 `land.sh` 와 부딪힌다 |
 | `show-me-your-work`, `figure-it-out` | 기록은 8단계 착륙 기록에 남긴다 |
 | mattpocock `code-review` 를 더 돌리기 | 리뷰 축과 겹치고 직렬 패스를 늘리며, 이름이 내장 code-review 와 겹친다 |
 | `principle-redesign-from-first-principles` | laziness 와 부딪힌다. grilling 지시문의 "removes the coupling" 줄이 맡는다 |

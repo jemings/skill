@@ -17,7 +17,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 
-# gh 스텁. 상태: $ST/pr_<N>.json, $ST/merge_err, $ST/repo.json, $ST/issue_<N>, $ST/mseq_<N>(mergeable 을 차례로 낸다),
+# gh 스텁. 상태: $ST/pr_<N>.json, $ST/merge_err, $ST/repo.json(repo view --json 의 병합 설정, $ST/fail_repo_view 면 exit 1), $ST/issue_<N>, $ST/mseq_<N>(mergeable 을 차례로 낸다),
 # $ST/sub_issues.json, $ST/search.json, $ST/fail_json_<필드>(pr view --json <필드> 가 exit 1). 받은 호출은 $ST/calls 에 한 줄씩 남는다. $ST/issue_<N> 내용이 FAIL 이면 조회가 exit 1 이다.
 # opt-in: $ST/live_head(내용은 bare 원격 경로)가 있으면 headRefOid 를 그 원격의 head 브랜치에서 읽고, 병합은 base 를 그 HEAD 로
 # 앞당긴다. $ST/on_merge_<N> 은 병합 호출마다 한 줄 "<move|stay> [gh 오류]" 를 꺼내 move 면 base 에 빈 커밋을 올리고, 그 오류
@@ -65,14 +65,17 @@ case "$1 $2" in
   "issue comment") cp "$(arg --body-file "$@")" "$st/comment_$3" ;;
   "issue view")
     if [ -f "$st/issue_$3" ]; then [ "$(cat "$st/issue_$3")" != FAIL ] || { echo "gh: issue $3 not found" >&2; exit 1; }; cat "$st/issue_$3"; else echo OPEN; fi ;;
-  "repo view") echo main ;;
+  "repo view")
+    case " $* " in
+      *" defaultBranchRef "*) echo main ;;
+      *) [ ! -f "$st/fail_repo_view" ] || { echo "gh: could not read repository" >&2; exit 1; }; emit < "$st/repo.json" ;;
+    esac ;;
   "api user") echo me ;;
   *)
     case " $* " in
       *" -X PATCH "*pulls/*) all="$*"; n=${all##*pulls/}; n=${n%% *}; b=$(arg -f "$@"); setf "$n" ".baseRefName=\"${b#base=}\"" ;;
       *sub_issues*) cat "$st/sub_issues.json" ;;
       *search/issues*) arg -f "$@" > "$st/search_q"; cat "$st/search.json" ;;
-      *" api repos/"*) emit < "$st/repo.json" ;;
       *) echo "gh stub: 모르는 호출: $*" >&2; exit 1 ;;
     esac ;;
 esac
@@ -100,7 +103,7 @@ setup_repo() {
   ( cd "$T/repo" && echo a > a && git add a && git commit -qm init && git push -q origin main
     git worktree add -q "$T/wt" -b feat && cd "$T/wt" && echo b > b && git add b && git commit -qm "feat: b" -m "Closes #5" && git push -q -u origin feat ) >/dev/null 2>&1
   HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD)
-  echo '{"allow_rebase_merge":true,"allow_squash_merge":true}' > "$ST/repo.json"
+  echo '{"rebaseMergeAllowed":true,"squashMergeAllowed":true,"mergeCommitAllowed":false}' > "$ST/repo.json"
   pr 7 state=OPEN isDraft=true headRefOid="$HEAD_SHA" headRefName=feat baseRefName=main mergeable=MERGEABLE
 }
 pr() { # pr <N> k=v... -- PR 상태 파일을 만들거나 고친다(isDraft 는 불리언)
@@ -180,13 +183,39 @@ t_land_loop_head_modified() { # 고리 길도 같다. PR 브랜치는 검수한 
   expect_rc 1; expect_has "BLOCKED #7 PR HEAD 가 병합 직전에 바뀌었다"; expect_pr_branch "$HEAD_SHA"
 }
 t_land_method_squash() { # 저장소가 rebase 를 막았으면 squash
-  setup_repo; echo '{"allow_rebase_merge":false,"allow_squash_merge":true}' > "$ST/repo.json"
+  setup_repo; echo '{"rebaseMergeAllowed":false,"squashMergeAllowed":true,"mergeCommitAllowed":false}' > "$ST/repo.json"
   run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA"; expect_rc 0; expect_called "pr merge 7 --repo o/r --squash"
 }
-t_land_via() { # 저장소의 착륙 명령을 PR 의 worktree 에서 돌리고 MERGED 를 확인한다
+t_land_method_explicit() { # 설정이 rebase, squash 를 모두 허용해도 --method squash 면 squash 로 넣는다
+  setup_repo; run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method squash
+  expect_rc 0; expect_called "pr merge 7 --repo o/r --squash --match-head-commit $HEAD_SHA"; expect_not_called "--rebase"
+}
+t_land_method_disallowed() { # 저장소가 허용하지 않는 --method 는 기록, ready, push, 병합 전에 BLOCKED 다(gh 길, 고리 길)
+  setup_repo; echo "기록" > "$T/ev"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --issue 5 --evidence "$T/ev" --method merge
+  expect_rc 1; expect_last "BLOCKED #7 저장소가 merge 병합을 허용하지 않는다"
+  expect_not_called "pr ready"; expect_not_called "pr merge"; expect_gone "$ST/comment_5"; expect_path "$T/wt"
+  loop_setup; echo '{"rebaseMergeAllowed":true,"squashMergeAllowed":false,"mergeCommitAllowed":false}' > "$ST/repo.json"
+  base_commit c c
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method squash --pre-merge "$PRE"
+  expect_rc 1; expect_last "BLOCKED #7 저장소가 squash 병합을 허용하지 않는다"
+  expect_not_called "pr ready"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"
+}
+t_land_method_merge() { # 설정이 merge 커밋을 허용하면 --method merge 로 넣는다
+  setup_repo; echo '{"rebaseMergeAllowed":true,"squashMergeAllowed":true,"mergeCommitAllowed":true}' > "$ST/repo.json"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method merge
+  expect_rc 0; expect_called "pr merge 7 --repo o/r --merge --match-head-commit $HEAD_SHA"
+}
+t_land_method_unreadable() { # 병합 설정을 읽지 못하면 기록, ready, 병합 전에 BLOCKED 다
+  setup_repo; echo "기록" > "$T/ev"; touch "$ST/fail_repo_view"
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --issue 5 --evidence "$T/ev"
+  expect_rc 1; expect_last "BLOCKED #7 저장소의 병합 방식을 읽지 못했다"
+  expect_not_called "pr ready"; expect_not_called "pr merge"; expect_gone "$ST/comment_5"
+}
+t_land_via() { # 저장소의 착륙 명령을 PR 의 worktree 에서 돌리고 MERGED 를 확인한다. 병합 설정은 읽지 않는다
   setup_repo
   run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --via "pwd > $T/via_cwd; touch $ST/merge_on_view_7"
-  expect_rc 0; expect_has "LANDED #7 feedface0000"; expect_not_called "pr merge"
+  expect_rc 0; expect_has "LANDED #7 feedface0000"; expect_not_called "pr merge"; expect_not_called "repo view"
   [ "$(cat "$T/via_cwd" 2>/dev/null)" = "$(cd "$T" && pwd -P)/wt" ] || bad "착륙 명령이 PR worktree 에서 돌지 않았다: $(cat "$T/via_cwd" 2>/dev/null)"
   expect_gone "$T/wt"
 }
@@ -246,6 +275,27 @@ t_check_forbid_rename() { # 금지 경로를 이름 바꾸기로 옮겨도 옛 �
   ( cd "$T/wt" && git mv a moved-a && git commit -qm "chore: move" ) >/dev/null
   run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --forbid-path '^a$'
   expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL 바뀐 파일"
+}
+t_check_closes_body() { # --closes-body: Closes 를 커밋 메시지 대신 PR 본문에서 찾는다
+  setup_repo; git -C "$T/wt" fetch -q origin
+  git -C "$T/wt" commit -q --amend -m "feat: b"; HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD); pr 7 headRefOid="$HEAD_SHA" body="무엇을 고쳤나
+
+Closes #5"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "OK Closes #5"; expect_called "--json body"
+  pr 7 body="본문에는 없다"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL Closes: PR 본문에"
+  setup_repo; git -C "$T/wt" fetch -q origin; pr 7 body="본문에는 없다"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL Closes: PR 본문에"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5
+  expect_rc 0; expect_has "OK Closes #5"
+  touch "$ST/fail_json_body"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL Closes: PR 본문을 읽지 못했다"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes-body
+  expect_rc 2; expect_err "--closes-body"; expect_not "SHAPE"
 }
 t_check_unknown() {
   setup_repo; git -C "$T/wt" fetch -q origin; pr 7 mergeable=UNKNOWN; printf 'UNKNOWN\nMERGEABLE\n' > "$ST/mseq_7"
@@ -529,7 +579,7 @@ t_land_loop_check_fails() { # 검사가 지면 병합 전 명령도 push 도 병
 t_land_loop_conflict() { # rebase 가 충돌하면 되돌리고 충돌 파일을 stderr 로 내며, 임시 worktree 와 디렉터리를 남기지 않는다
   loop_setup; base_commit b other; mkdir "$T/tmp"
   TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
-  expect_rc 1; expect_last "BLOCKED #7 base 와 충돌한다 -- rebase 가 필요하다"; expect_not_called "pr merge"
+  expect_rc 1; expect_last "BLOCKED #7 base 와 충돌한다 -- 따라잡기가 필요하다"; expect_not_called "pr merge"
   printf '%s\n' "$ERR" | grep -qx b || bad "stderr 에 충돌 파일 b 가 한 줄로 없다: $ERR"
   expect_no_temp; expect_pr_branch "$HEAD_SHA"
 }
@@ -688,7 +738,7 @@ t_land_loop_base_rewound() { # base 가 강제로 되감겨도 받는다(+refspe
 }
 t_land_loop_conflicting() { loop_setup; pr 7 mergeable=CONFLICTING
   run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
-  expect_rc 1; expect_last "BLOCKED #7 base 와 충돌한다 -- rebase 가 필요하다"; expect_not_called "pr merge"; }
+  expect_rc 1; expect_last "BLOCKED #7 base 와 충돌한다 -- 따라잡기가 필요하다"; expect_not_called "pr merge"; }
 
 t_land_loop_term_on_push() { # push 하는 동안 TERM 을 받아도 끝나기 전에 PR 브랜치를 검수한 SHA 로 되돌린다
   loop_setup
@@ -762,12 +812,12 @@ t_missing_case_fn() {
   expect_rc 1; expect_has 'FAIL no such case: t_no_such_case 함수가 없다'; expect_not 'PASS no such case'; expect_has 'pass 0 fail 1'
 }
 
-CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_gh_transient land_gh_transient_limit land_gh_retry_mergeable land_gh_rounds_arg land_gh_head_modified land_loop_head_modified land_method_squash
+CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_gh_transient land_gh_transient_limit land_gh_retry_mergeable land_gh_rounds_arg land_gh_head_modified land_loop_head_modified land_method_squash land_method_explicit land_method_disallowed land_method_merge land_method_unreadable
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
 land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
 land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
 land_loop_base land_loop_unknown land_loop_base_rewound land_loop_patch_count land_loop_hn_nopush
-check_ok check_fails check_forbid_rename check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
+check_ok check_fails check_forbid_rename check_closes_body check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
 check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
 check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses

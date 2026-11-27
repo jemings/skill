@@ -11,7 +11,9 @@
 #   --base B         PR 의 대상 브랜치를 B 로 바꾼 뒤 넣는다(stacked PR 의 마지막 층)
 #   --via CMD        저장소가 정한 착륙 명령(예: 'sh scripts/push-main.sh'). PR 의 worktree 에서 sh -c 로 돌리고,
 #                    끝난 뒤 PR 이 MERGED 인지 gh 로 확인한다. 주지 않으면 gh pr merge 로 넣는다
-#   --method M       --via 가 없을 때의 병합 방식. 기본은 저장소 설정에서 rebase > squash > merge 순으로 허용된 것
+#   --method M       --via 가 없을 때의 병합 방식. 기본은 저장소 설정에서 rebase > squash > merge 순으로 허용된 것.
+#                    설정(gh repo view --json rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed)이 M 을 허용하지 않으면
+#                    기록, 대상 변경, push, ready 전에 BLOCKED 로 멈춘다
 #   --close-stack L  스택의 앞 층 PR 들. 넣은 뒤 "#P 로 들어갔다" 댓글과 함께 닫고 그 브랜치도 정리한다
 #   --keep           worktree, 로컬 브랜치를 남긴다(계약서에 다음 PR 이 남았을 때)
 #   --check CMD      검사 명령. 0 이 아니면 push 하지 않고 BLOCKED
@@ -42,10 +44,11 @@
 # 출력(마지막 줄이 판정):
 #   LANDED #P <병합 커밋> [ISSUE #N OPEN|CLOSED]   exit 0
 #   BLOCKED #P <이유>                               exit 1  (HEAD 가 바뀜, 충돌, 착륙 명령 실패, 병합 안 됨)
-#     저장소 명령이 있을 때의 이유: base 와 충돌한다 -- rebase 가 필요하다 (충돌 파일은 stderr) | rebase 가 패치를 바꿨다
+#     저장소 명령이 있을 때의 이유: base 와 충돌한다 -- 따라잡기가 필요하다 (충돌 파일은 stderr) | rebase 가 패치를 바꿨다
 #     | 검사 실패: <cmd> | 병합 전 명령이 실패했다: <cmd> | base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS)
 #     | PR 브랜치에 push 하지 못했다 (lease 거절이면 검수 뒤 남이 push 했다) | PR HEAD 가 올린 tip <sha> 이 되지 않았다(<HEAD>)
 #     | base <b> 를 받지 못했다 | 임시 worktree 를 만들지 못했다 | 임시 디렉터리를 만들지 못했다
+#   --via 가 아닐 때의 이유: 저장소가 <방식> 병합을 허용하지 않는다 | 저장소의 병합 방식을 읽지 못했다
 #   gh 병합(저장소 명령 없음)의 이유: base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS) | PR HEAD 가 병합 직전에 바뀌었다: <gh 오류 한 줄> (두 길 모두)
 #   NEEDS_HUMAN #P <gh 오류 한 줄>                  exit 3  (보호 규칙이 사람의 승인을 요구한다. PR 은 ready 로 남는다)
 #   CLEANED #P                                      exit 0  (--cleanup)
@@ -147,9 +150,13 @@ ready_pr() {
   gh pr ready "$pr" --repo "$repo" >&2 || { out "BLOCKED #$pr ready 로 바꾸지 못했다"; exit 1; }
   draft=false
 }
-resolve_method() {
-  [ -n "$method" ] || method=$(gh api "repos/$repo" --jq 'if .allow_rebase_merge then "rebase" elif .allow_squash_merge then "squash" else "merge" end') \
+resolve_method() { # -> method. 허용된 방식은 rebase > squash > merge 순서의 목록이다
+  local allowed
+  allowed=$(gh repo view "$repo" --json rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed \
+    --jq '[(select(.rebaseMergeAllowed) | "rebase"), (select(.squashMergeAllowed) | "squash"), (select(.mergeCommitAllowed) | "merge")] | join(" ")') \
     || { out "BLOCKED #$pr 저장소의 병합 방식을 읽지 못했다"; exit 1; }
+  if [ -z "$method" ]; then method=${allowed%% *}; method=${method:-merge}; return 0; fi
+  case " $allowed " in *" $method "*) ;; *) out "BLOCKED #$pr 저장소가 $method 병합을 허용하지 않는다"; exit 1 ;; esac
 }
 merge_failed() { # <gh pr merge 의 stderr> -- 판정 줄을 내고 끝낸다
   local line
@@ -207,7 +214,7 @@ build_tip() { # -> base_sha, tip
     if ! git -C "$tree" rebase -q "$base_sha" >&2; then
       git -C "$tree" diff --name-only --diff-filter=U >&2
       git -C "$tree" rebase --abort >&2
-      out "BLOCKED #$pr base 와 충돌한다 -- rebase 가 필요하다"; exit 1
+      out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
     fi
     rebased=$(git -C "$tree" rev-parse HEAD)
     after=$(patch_ids "$base_sha..$rebased")
@@ -226,7 +233,7 @@ await_tip() {
   for i in $(seq 1 "$TRIES"); do
     seen=$(view "$pr" headRefOid,mergeable '.headRefOid + " " + .mergeable') || seen=''
     if [ "${seen% *}" = "$tip" ] && [ "${seen#* }" != UNKNOWN ]; then
-      [ "${seen#* }" != CONFLICTING ] || { out "BLOCKED #$pr base 와 충돌한다 -- rebase 가 필요하다"; exit 1; }
+      [ "${seen#* }" != CONFLICTING ] || { out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1; }
       return 0
     fi
     [ "$i" = "$TRIES" ] || sleep "$POLL" # GitHub 가 push 와 mergeable 을 반영하는 중이다
@@ -240,7 +247,6 @@ land_loop() {
   tmp_root=$(mktemp -d) || { out "BLOCKED #$pr 임시 디렉터리를 만들지 못했다"; exit 1; }
   trap on_exit EXIT
   trap 'exit 1' INT TERM HUP
-  resolve_method
   for round in $(seq 1 "$ROUNDS"); do
     if [ "$rebuild" = 1 ]; then
       build_tip
@@ -270,10 +276,9 @@ land_gh() {
       mergeable=$(view "$pr" mergeable .mergeable) || mergeable=UNKNOWN
     done
     case $mergeable in
-      CONFLICTING) out "BLOCKED #$pr base 와 충돌한다 -- rebase 가 필요하다"; exit 1 ;;
+      CONFLICTING) out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1 ;;
       UNKNOWN) out "BLOCKED #$pr mergeable 이 끝내 UNKNOWN 이다"; exit 1 ;;
     esac
-    resolve_method
     err=$(gh pr merge "$pr" --repo "$repo" "--$method" --match-head-commit "$head" 2>&1 >/dev/null) && return 0
     case $err in *"Base branch was modified"*) continue ;; esac
     merge_failed "$err"
@@ -305,6 +310,7 @@ fi
 
 [ "$state" = OPEN ] || { out "BLOCKED #$pr PR 이 열려 있지 않다($state)"; exit 1; }
 case $head in "$sha"*) ;; *) out "BLOCKED #$pr PR HEAD 가 검수한 SHA 와 다르다(HEAD ${head:0:12}, 검수 $sha)"; exit 1 ;; esac
+[ "$mode" = via ] || resolve_method
 
 if [ -n "$evidence" ]; then
   gh issue comment "$issue" --repo "$repo" --body-file "$evidence" >&2 || { out "BLOCKED #$pr 검증 기록을 #$issue 에 남기지 못했다"; exit 1; }

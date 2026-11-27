@@ -1423,6 +1423,80 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   grep -qF '**가벼움 구현은 `haiku`/`max` 다.**' "$sk" || bad "(k) 등급 절에 가벼움 구현 항목이 없다"
 }
 
+# 병합 방식은 0단계가 정하는 한 값이고, 2-8단계와 두 지시문은 그 값을 읽기만 한다. 줄바꿈을 한 칸으로 이어 구절을 찾는다.
+joined() { sed 's/^ *//' | tr '\n' ' '; }
+case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블록, 7단계 --closes-body, 재리뷰와 예외 (iii), 8단계 --method, BLOCKED 행, 두 지시문, 용어
+  local dir=$SCRIPTS/.. sk ib rb wt dc f sec all
+  sk=$dir/SKILL.md ib=$dir/references/implement-brief.md rb=$dir/references/review-brief.md
+  wt=$dir/references/watching.md dc=$dir/references/disciplines.md
+  # (a) 0단계 병합: 출처 우선순위, 허용하지 않으면 묻기, --via, 두 갈래
+  sec=$(awk '/^- \*\*병합\*\*:/ { f = 1; print; next } /^- \*\*/ || /^## / { f = 0 } f' "$sk" | joined)
+  [ -n "$sec" ] || bad "(a) 0단계에 '병합' 항목이 없다"
+  for f in '출처 우선순위는 실행 인자 > 저장소 규칙(`CLAUDE.md`/`AGENTS.md`) > 사용자 상시 선호(전역 `CLAUDE.md`, 메모리) > GitHub 설정(허용된 것 가운데 rebase > squash > merge)' \
+    'rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed' '허용하지 않으면 쓰기 전에 `AskUserQuestion` 으로 묻는다(조용히 바꾸지 않는다)' \
+    '`--via` 면 방식은 규칙이 정하고, 없으면 rebase 로 본다' '**커밋 보존**(rebase, merge)' '**합침**(squash)' \
+    '충돌하거나 보호 규칙이 최신을 요구할 때만 `git merge origin/<base>` 로 따라잡고 force-push 하지 않는다'; do
+    case $sec in *"$f"*) ;; *) bad "(a) 0단계 병합 항목에 '$f' 가 없다" ;; esac
+  done
+  # (b) 상태 블록: 병합 칸이 따로 있고 착륙 칸은 실행 경로만 적는다
+  grep -qF ', 병합 <rebase|squash|merge>, ' "$sk" || bad "(b) 상태 블록에 '병합 <rebase|squash|merge>' 칸이 없다"
+  grep -F '착륙 <--via' "$sk" | grep -qF 'gh <방식>' && bad "(b) 상태 블록 착륙 칸에 방식(gh <방식>)이 남아 있다"
+  # (c) 7단계 1항: --closes-body 와 주는 조건
+  sec=$(awk '/^1\. \*\*모양\*\*/ { f = 1 } /^2\. \*\*리뷰어를 띄운다\*\*/ { f = 0 } f' "$sk" | joined)
+  for f in '--closes <N> [--closes-body]' '`--closes-body` 는 0단계 `병합` 이 squash 이고 `착륙` 이 `--via` 가 아닐 때 준다'; do
+    case $sec in *"$f"*) ;; *) bad "(c) 7단계 1항에 '$f' 가 없다" ;; esac
+  done
+  # (d) 재리뷰 대상과 예외 (iii): 커밋 보존은 커밋 단위 목록, 합침은 PR 고유 diff 의 patch-id
+  sec=$(awk '/^\*\*걸림\*\*/ { f = 1 } /^## 8\./ { f = 0 } f' "$sk")
+  all=$(printf '%s\n' "$sec" | joined)
+  for f in '구현자가 충돌 없이, 또는 기계적으로 풀었다고 보고한 따라잡기로' \
+    '`git diff -U0 $(git merge-base <리뷰한 SHA> origin/<base>) <리뷰한 SHA> | git patch-id --stable` 과 `git diff -U0 $(git merge-base HEAD origin/<base>) HEAD | git patch-id --stable`' \
+    '합침(squash)이면 `git diff <리뷰한 SHA>..HEAD` 가 아니라' 'Fix 나 따라잡기 뒤에는 **기본이 재리뷰다**'; do
+    case $all in *"$f"*) ;; *) bad "(d) 7단계 걸림에 '$f' 가 없다" ;; esac
+  done
+  f=$(printf '%s\n' "$sec" | awk '/^  - 커밋 보존:/ { f = 1 } /^  - 합침\(squash\):/ { f = 0 } f' | joined)
+  case $f in *'`git log -p -U0 --reverse <mb>..<리뷰한 SHA>'*'`land.sh` 의 패치 판정과 같은 명령이다'*) ;; *) bad "(d) 예외 (iii) 의 커밋 보존 갈래에 커밋 단위 명령과 land.sh 문장이 없다: $f" ;; esac
+  f=$(printf '%s\n' "$sec" | awk '/^  - 합침\(squash\):/ { f = 1 } /^$/ { f = 0 } f' | joined)
+  case $f in *'git patch-id --stable'*) ;; *) bad "(d) 예외 (iii) 에 합침(squash) 갈래가 없다" ;; esac
+  case $f in *'land.sh'*) bad "(d) 예외 (iii) 의 합침 갈래에 land.sh 문장이 있다: $f" ;; esac
+  # (e) 8단계 호출 틀은 --method 를 늘 넘기고(--via 와 둘 중 하나), 새 BLOCKED 행이 있다
+  sec=$(awk '/^2\. 넣는다/ { f = 1 } f && /^3\. / { exit } f' "$sk" | joined)
+  for f in '--evidence <기록 파일> (--method <0단계 병합> | --via '\''<착륙 명령>'\'')' '`--method` 는 언제나 0단계 `병합` 값을 준다'; do
+    case $sec in *"$f"*) ;; *) bad "(e) 8단계 2항에 '$f' 가 없다" ;; esac
+  done
+  f=$(grep -E '^\| `BLOCKED \.\.\. 저장소가 <방식> 병합을 허용하지 않는다` \|' "$sk" || true)
+  [ -n "$f" ] || bad "(e) 8단계 표에 '저장소가 <방식> 병합을 허용하지 않는다' 행이 없다"
+  case $f in *'0단계 `병합`'*'사람에게 묻'*) ;; *) bad "(e) 새 BLOCKED 행의 처리에 0단계 병합 방식 고치기나 사람에게 묻기가 없다: $f" ;; esac
+  f=$(grep -F '| `BLOCKED ... rebase 가 패치를 바꿨다` |' "$sk" || true)
+  case $f in *'0단계 `병합` 이 squash 이고 저장소 명령(`--check`, `--pre-merge`)으로 넣으면'*'사람에게 넘기고, 고리 모드의 squash 지원은 후속 이슈로 낸다'*) ;;
+    *) bad "(e) 'rebase 가 패치를 바꿨다' 행에 squash 고리 모드는 사람에게 넘긴다는 문장이 없다: $f" ;; esac
+  # (f) 구현 지시문: 갈래 두 벌(Then 2, Follow-up), 합침 갈래의 문장, 커밋 보존 갈래는 그대로
+  [ "$(grep -cF '<커밋 보존(rebase, merge)이면>' "$ib")" = 2 ] || bad "(f) implement-brief 의 커밋 보존 갈래가 두 곳(Then, Follow-up)이 아니다"
+  [ "$(grep -cF '<합침(squash)이면>' "$ib")" = 2 ] || bad "(f) implement-brief 의 합침 갈래가 두 곳(Then, Follow-up)이 아니다"
+  all=$(joined < "$ib")
+  for f in 'Put **`Closes #<N>` in the last commit message** of the last PR' 'Put **`Closes #<N>` in the PR body** of the last PR' \
+    'no `--fixup`' 'The PR title follows the repo'\''s commit convention' 'it becomes the commit title on `<base>`' \
+    'Merge `origin/<base>` only when it conflicts with your branch or the request says branch protection requires the branch to be up to date' \
+    'never force-push' 'rebase onto `origin/<base>` (never merge)' '`git push --force-with-lease`' '--autosquash' '**따라잡기**'; do
+    case $all in *"$f"*) ;; *) bad "(f) implement-brief 에 '$f' 가 없다" ;; esac
+  done
+  # (g) 리뷰 지시문의 재리뷰 줄: 합침이면 PR 고유 diff 둘의 비교
+  all=$(joined < "$rb")
+  for f in '<합침(squash)이면:' 'git diff $(git merge-base <마지막으로 리뷰한 SHA> origin/<base>) <마지막으로 리뷰한 SHA>' 'git diff $(git merge-base HEAD origin/<base>) HEAD' '<커밋 보존(rebase, merge)이면:'; do
+    case $all in *"$f"*) ;; *) bad "(g) review-brief 재리뷰 줄에 '$f' 가 없다" ;; esac
+  done
+  # (h) 용어: 요청 이름과 진행 목록 단계는 따라잡기다
+  for f in "$sk" "$ib" "$wt"; do
+    all=$(joined < "$f")
+    for sec in 'Rebase 요청' '단계 `rebase`' 'Fix/Rebase' 'Fix, Rebase' 'Fix 나 Rebase' '**Rebase**' 'Rebase 를 보낸다' '/ Rebase /' '겹치는 PR 의 rebase' '`수정`, `rebase`'; do
+      case $all in *"$sec"*) bad "(h) $(basename "$f") 에 '$sec' 가 남아 있다" ;; esac
+    done
+  done
+  grep -qF '`수정`, `따라잡기`, `다음 PR 대기`' "$sk" || bad "(h) 진행 목록 단계에 '따라잡기' 가 없다"
+  grep -qF 'squash 병합을 전제해' "$dc" && bad "(h) disciplines.md 에 'squash 병합을 전제해' 가 남아 있다"
+  grep -qF '직접 병합해 `land.sh` 와 부딪힌다' "$dc" || bad "(h) disciplines.md 에 '직접 병합해 \`land.sh\` 와 부딪힌다' 가 없다"
+}
+
 # ---- 정적 검사 ----
 # 길이 확인 없이 펼친 배열("${a[@]}", ${a[*]}, ${a[@]:1})이 없어야 한다. bash 4.3 이하는 set -u 아래 빈 배열 펼침에서 죽는다.
 # 안전한 꼴: ${a[@]+"${a[@]}"}, ${a[*]+${a[*]}}, ${#a[@]}, ${!a[@]}.
@@ -1786,6 +1860,7 @@ CASES=(
   'in-flight --where: 인자를 주면 exit 2:case_where_rejects_args'
   'in-flight --where: SKILL.md 정적 검사:case_where_skill_static'
   '지시문, 규율 카드 정적 검사:case_dispatch_prose_static'
+  '병합 방식 정적 검사:case_merge_method_static'
   'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
   'in-flight 7 6 -> 깨진 claim 이 판정을 막지 않는다:case_flight_broken_claim_file'
   'in-flight --claim -> 임시 파일이 남지 않고 새 파일로 바뀐다:case_flight_claim_atomic'
