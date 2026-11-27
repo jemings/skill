@@ -57,6 +57,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash scripts/check-quotes.sh plugins/agent-dispatch
 
+      - name: plugin.json version 올림
+        if: ${{ !cancelled() }}
+        env:
+          BASE_REV: ${{ github.event_name == 'push' && github.event.before || format('origin/{0}', github.base_ref || 'main') }}
+        run: bash scripts/check-version.sh "$BASE_REV"
+
       - name: test-check-quotes.sh
         if: ${{ !cancelled() }}
         run: bash scripts/test-check-quotes.sh
@@ -64,6 +70,10 @@ jobs:
       - name: test-check-scan.sh
         if: ${{ !cancelled() }}
         run: bash scripts/test-check-scan.sh
+
+      - name: test-check-version.sh
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-check-version.sh
 
       - name: agent-dispatch test-tools.sh
         if: ${{ !cancelled() }}

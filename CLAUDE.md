@@ -24,6 +24,18 @@ Claude Code 스킬을 독립 설치 가능한 플러그인으로 배포하는 �
 한다 — 그래야 이미 옛 이름으로 설치한 사용자가 다음 동기화에서 자동으로
 새 이름으로 이전된다. 누락하면 해당 사용자의 설치가 끊긴 채로 남는다.
 
+이 규칙은 `scripts/check-version.sh` 가 base(`origin/main` 과의 merge-base)와 워킹트리를
+비교해 확인한다. 안 올렸거나 내렸으면 exit 1 과 `plugins/<name>: version <v> 가 base 와 같다`
+꼴의 줄을 낸다(얕은 저장소, 풀리지 않는 rev, 권한이나 git 객체 읽기 실패는 exit 3). 커밋 전에 돌리고, 필요하면
+`git fetch origin main` 을 먼저 한다. CI 의 `checks` 워크플로가 같은 검사를 돈다.
+새 플러그인과 삭제된 플러그인은 면제하고, base 쪽 plugin.json 이 깨졌거나 version 이
+x.y.z 꼴이 아니면 경고를 내고 면제한다. `land.sh --check` 배선은 따로 다룬다.
+
+```bash
+bash scripts/check-version.sh
+bash scripts/test-check-version.sh
+```
+
 ## statusline-kit statusline 스크립트는 별도 표식을 함께 올린다
 
 `statusline-command.sh` / `statusline-tokens.sh` 는 `install.sh` 의 다운그레이드
@@ -135,7 +147,7 @@ SCANNER_BIN=<dir>/bin/skill-scanner bash scripts/test-check-scan.sh
 
 `.github/workflows/checks.yml`(job `checks`)이 PR(draft 포함)과 main push 마다 스캐너
 게이트(`check-scan.sh plugins`), `check-ascii.sh` / `check-quotes.sh`
-(`plugins/agent-dispatch`), 루트 하네스 둘, agent-dispatch `test-tools.sh` /
+(`plugins/agent-dispatch`), version 올림 검사(`check-version.sh`), 루트 하네스 셋, agent-dispatch `test-tools.sh` /
 `test-scripts.sh`, statusline-kit `test-install.sh`, actionlint 를 모두 돈다. 필수
 체크는 아니다(첫 초록 실행 뒤 사람이 판단한다). 그리고 위의 커밋 전 검사를 대신하지
 않는다. CI 는 늦게 알려 줄 뿐이다.
