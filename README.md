@@ -109,7 +109,9 @@ scripts/
 ├── check-quotes.sh                           # maintainer guard: shell files whose quotes stay open to EOF (what the in-house scanner misreads, #38)
 ├── test-check-quotes.sh                      # harness for check-quotes.sh (optional SCANNER_PY differential)
 ├── check-scan.sh                             # maintainer guard: runs the in-house skill scanner over a path, fails on is_safe: false (exit 3 = scanner unusable)
-└── test-check-scan.sh                        # harness for check-scan.sh (stub scanner; optional SCANNER_BIN differential)
+├── test-check-scan.sh                        # harness for check-scan.sh (stub scanner; optional SCANNER_BIN differential)
+├── check-version.sh                          # maintainer guard: a change under plugins/<name>/ must raise that plugin.json version vs the merge-base (exit 3 = cannot judge, e.g. shallow clone)
+└── test-check-version.sh                     # harness for check-version.sh (temp git repos, no network)
 plugins/
 ├── gh-pr-reply/   (plugin.json + skills/gh-pr-reply/{SKILL.md, references/})
 ├── gh-pr-approve/ (plugin.json + skills/gh-pr-approve/{SKILL.md, references/})
@@ -139,6 +141,8 @@ bash scripts/check-quotes.sh plugins/agent-dispatch                             
 bash scripts/test-check-quotes.sh                                               # check-quotes.sh harness (SCANNER_PY=<scanner python> adds a differential run)
 bash scripts/check-scan.sh plugins                                              # whole in-house skill scanner, is_safe gate (exit 1 lists file:line:rule severity, exit 3 = scanner missing)
 bash scripts/test-check-scan.sh                                                 # check-scan.sh harness (stub scanner; SCANNER_BIN=<skill-scanner> adds a real-scanner differential)
+bash scripts/check-version.sh                                                   # plugins/<name>/ changed without raising its plugin.json version vs merge-base with origin/main (exit 1 lists them; git fetch origin main first)
+bash scripts/test-check-version.sh                                              # check-version.sh harness (temp git repos)
 ```
 
 CI (`.github/workflows/checks.yml`) runs all of the above plus `actionlint` on every pull request and every push to `main`.

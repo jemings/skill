@@ -16,6 +16,17 @@ Claude Code 스킬을 독립 설치 가능한 플러그인으로 배포하는 �
 문서 수정은 의미가 없다. semver 기준은 동작 변경 없는 정리는 patch, 기능 추가나
 사용자에게 보이는 표시 변경은 minor.
 
+이 규칙은 `scripts/check-version.sh` 가 base(`origin/main` 과의 merge-base)와 워킹트리를
+비교해 확인한다. 안 올렸거나 내렸으면 exit 1 과 `plugins/<name>: version <v> 가 base 와 같다`
+꼴의 줄을 낸다(얕은 저장소나 풀리지 않는 rev 는 exit 3). 커밋 전에 돌리고, 필요하면
+`git fetch origin main` 을 먼저 한다. CI 의 `checks` 워크플로가 같은 검사를 돈다.
+`land.sh --check` 배선은 따로 다룬다.
+
+```bash
+bash scripts/check-version.sh
+bash scripts/test-check-version.sh
+```
+
 새 플러그인을 추가할 때는 루트 `.claude-plugin/marketplace.json` 의 `plugins`
 배열에도 등록해야 마켓플레이스에 노출된다.
 
@@ -135,7 +146,7 @@ SCANNER_BIN=<dir>/bin/skill-scanner bash scripts/test-check-scan.sh
 
 `.github/workflows/checks.yml`(job `checks`)이 PR(draft 포함)과 main push 마다 스캐너
 게이트(`check-scan.sh plugins`), `check-ascii.sh` / `check-quotes.sh`
-(`plugins/agent-dispatch`), 루트 하네스 둘, agent-dispatch `test-tools.sh` /
+(`plugins/agent-dispatch`), version 올림 검사(`check-version.sh`), 루트 하네스 셋, agent-dispatch `test-tools.sh` /
 `test-scripts.sh`, statusline-kit `test-install.sh`, actionlint 를 모두 돈다. 필수
 체크는 아니다(첫 초록 실행 뒤 사람이 판단한다). 그리고 위의 커밋 전 검사를 대신하지
 않는다. CI 는 늦게 알려 줄 뿐이다.
