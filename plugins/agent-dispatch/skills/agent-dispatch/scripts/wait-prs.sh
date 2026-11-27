@@ -15,7 +15,7 @@
 # 일(생긴 것만 한 줄씩 낸다):
 #   MERGED <PR>               병합됐다
 #   CLOSED <PR>               병합되지 않고 닫혔다
-#   CONFLICTING <PR>          열려 있지만 base 와 충돌한다 -- rebase 가 필요하다(이 실행의 PR 만)
+#   CONFLICTING <PR>          열려 있지만 base 와 충돌한다 -- 따라잡기가 필요하다(이 실행의 PR 만)
 #   FEEDBACK <PR> <시각>      커서 뒤에 PR 피드백이 달렸다(이 실행의 열린 PR 만) -- 시각은 그 가운데 가장 늦은 것.
 #                             PR 피드백: 봇이 아닌 계정의 제출된 리뷰(인라인은 그 리뷰의 제출 시각)와 숨기지 않은 대화 댓글
 #   GH_FAILING <PR> <이유>    그 PR 의 조회가 잇달아 실패했다(기본 10회, WAIT_PRS_MAX_FAIL) -- 이유는 gh 의 마지막 오류 한 줄
