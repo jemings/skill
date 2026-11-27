@@ -1649,6 +1649,12 @@ case_mutate_static_sees_copy() { # 정적 검사도 변이한 사본을 읽는�
   [ "$(orig_sum)" = "$before" ] || bad "원본 스크립트가 바뀌었다"
 }
 
+case_mutate_meta_inherit() { # 하네스 자신의 안쪽 실행은 바깥 MUTATE 를 물려받지 않는다: 무해한 변이는 SURVIVED, exit 1
+  run_self '^case 함수가 없으면 FAIL$' 'in-flight.sh:s/^# in-flight.sh -- /# in-flight.sh - /'
+  expect_rc 1; expect_out_has 'MUTANT SURVIVED'
+  expect_out_has '1 passed, 0 failed, 0 skipped'
+}
+
 # ---- 실행 ----
 run_case() { # <표시 이름> <함수> [인자...]
   local label=$1; shift
@@ -1662,7 +1668,7 @@ run_case() { # <표시 이름> <함수> [인자...]
 case_missing_case_fn() {
   local cp=$STUB_DATA/../self.sh
   sed -e "s|^SCRIPTS=.*|SCRIPTS=$SCRIPTS|" -e "s|^CASES=(\$|&\n  'no such case:case_no_such_fn native'|" "${BASH_SOURCE[0]}" > "$cp"
-  run_nested=$(ONLY='^no such case$' bash "$cp" 2>&1); local rc=$?
+  run_nested=$(env -u MUTATE -u HARNESS_INNER ONLY='^no such case$' bash "$cp" 2>&1); local rc=$?
   [ "$rc" = 1 ] || bad "exit 1 이어야 하는데 $rc ($run_nested)"
   case $run_nested in *'FAIL no such case: case_no_such_fn 함수가 없다'*) ;; *) bad "FAIL 줄이 없다: $run_nested" ;; esac
   case $run_nested in *'PASS no such case'*) bad "PASS 로 셌다: $run_nested" ;; esac
@@ -1796,6 +1802,7 @@ CASES=(
   'MUTATE 가 wait-prs.sh 사본의 네이티브 경우를 죽인다:case_mutate_wait_native'
   'MUTATE 가 docker 경로의 사본도 돌고, 못 돌면 exit 2:case_mutate_wait_docker'
   'MUTATE 일 때 ONLY 에 맞는 것이 없으면 exit 2:case_mutate_no_match'
+  'MUTATE 가 하네스 자신의 안쪽 실행에 새지 않는다:case_mutate_meta_inherit'
   'ONLY 가 올바른 ERE 가 아니면 exit 2 와 이유:case_only_bad_ere'
 )
 # bash:3.2 컨테이너에서 같은 경우를 돌린다(3.2 의 빈 배열 동작은 4.0~4.3 과 같다)
