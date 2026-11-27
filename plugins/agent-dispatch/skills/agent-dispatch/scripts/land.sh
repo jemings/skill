@@ -17,21 +17,27 @@
 #   --close-stack L  스택의 앞 층 PR 들. 넣은 뒤 "#P 로 들어갔다" 댓글과 함께 닫고 그 브랜치도 정리한다
 #   --keep           worktree, 로컬 브랜치를 남긴다(계약서에 다음 PR 이 남았을 때)
 #   --check CMD      검사 명령. 0 이 아니면 push 하지 않고 BLOCKED
-#   --pre-merge CMD  병합 전 명령. 스스로 커밋한다(0개도 된다). 끝난 뒤 트리가 깨끗하고 HEAD 가 rebase 된 tip 의 자손이어야 한다
+#   --pre-merge CMD  병합 전 명령. 스스로 커밋한다(0개도 된다). 끝난 뒤 트리가 깨끗하고 HEAD 가 착륙 tip 의 자손이어야 한다
 #   --push-env K=V   land.sh 가 PR 브랜치에 하는 push(tip 과 복원)에만 주는 env. 여러 번 준다. 브랜치 삭제 push 에는 주지 않는다
 #
 # 저장소 명령(--check, --pre-merge)이 하나라도 있으면 round 를 돈다. 없으면 --via 나 gh 병합으로 한 번에 넣는다.
 # --via 와 저장소 명령, --push-env 는 함께 주지 않고, --push-env 는 저장소 명령과만 준다.
 # round: <remote>/<base> 를 fetch 해 그 SHA 를 round 의 base 로 두고, 검수한 SHA 의 detached 임시 worktree(temp-tree.sh)를
-# 만들어 base 가 조상이 아니면 rebase 한다. rebase 했으면 패치를 비교한다: mb=$(git merge-base <검수한 SHA> <base>) 로
-# git log -p -U0 --reverse <mb>..<검수한 SHA> | git patch-id --stable 의 patch-id 열 목록이 rebase 된 tip 쪽과 같아야 한다
-# (범위에 merge 커밋이 있거나 rebase 뒤 범위가 비어도 바뀐 것이다). 그다음 검사 명령, 병합 전 명령을 돌리고, tip 이 PR HEAD 와
+# 만들어 base 가 조상이 아니면 base 를 얹은 착륙 tip 을 만들고 패치를 비교한다. 갈래는 병합 방식이 정한다.
+#   커밋 보존(rebase, merge): base 위로 rebase 한 tip. 커밋 패치 판정: mb=$(git merge-base <검수한 SHA> <base>) 로
+#   git log -p -U0 --reverse <mb>..<검수한 SHA> | git patch-id --stable 의 patch-id 열 목록이 rebase 한 tip 쪽과 같아야 한다
+#   (범위에 merge 커밋이 있거나 rebase 뒤 범위가 비어도 바뀐 것이다).
+#   squash: rebase 하지 않고 git merge --no-ff <base> 로 base 를 합친 tip(rebase 처럼 commit-msg, pre-merge-commit 훅과
+#   서명 검사를 거치지 않는다). 고유 diff 판정: <rev> 마다
+#   git diff -U0 $(git merge-base <rev> <base>) <rev> | git patch-id --stable 의 patch-id 가 검수한 SHA 와 그 tip 에서 같아야 한다
+#   (tip 쪽이 비어도 바뀐 것이다. 범위의 merge 커밋은 괜찮다).
+# 그다음 검사 명령, 병합 전 명령을 돌리고, tip 이 PR HEAD 와
 # 다르면 --force-with-lease=refs/heads/<branch>:<기대 HEAD> 로 push 한다(기대 HEAD 는 처음엔 검수한 SHA, 다음부터는 앞 round 에
 # 올린 tip). PR HEAD 가 tip 이 되고 mergeable 이 정해지기를 기다려 draft 면 ready 로 바꾸고 --match-head-commit <tip> 으로 병합한다.
 # 병합이 지면 base 를 다시 fetch 한다. 움직였으면 검수한 SHA 에서 새로 round 를 돈다. 그대로인데 gh 가 Base branch was modified 를
 # 내면 같은 tip 으로 다시 병합한다(이것도 round 로 센다). 그 밖에는 아래 판정을 따른다. 임시 worktree 는 끝나면 늘 지운다.
 # 두 명령은 임시 worktree 루트에서 sh -c 로 돌고, 출력은 stderr 로 간다. env: LAND_REPO LAND_PR LAND_BRANCH LAND_BASE
-# LAND_BASE_SHA(round 의 base) LAND_SHA(검수한 SHA, 40자) LAND_HEAD(rebase 된 tip).
+# LAND_BASE_SHA(round 의 base) LAND_SHA(검수한 SHA, 40자) LAND_HEAD(착륙 tip).
 # PR 브랜치에 tip 을 push 하기 직전마다 stderr 에 "land: 올린 tip <40자>" 한 줄을 낸다.
 # 복원: push 한 뒤(push 하는 중에 신호를 받았어도) BLOCKED 로 끝나면 PR 브랜치를 --force-with-lease=refs/heads/<branch>:<마지막으로 올린 tip> 으로 검수한 SHA 에
 # 되돌린다(실패하면 판정 줄 뒤에 stderr 로 알린다). NEEDS_HUMAN 이면 되돌리지 않는다. gh pr merge 가 0 으로 끝났거나 그 호출 중에
@@ -44,7 +50,8 @@
 # 출력(마지막 줄이 판정):
 #   LANDED #P <병합 커밋> [ISSUE #N OPEN|CLOSED]   exit 0
 #   BLOCKED #P <이유>                               exit 1  (HEAD 가 바뀜, 충돌, 착륙 명령 실패, 병합 안 됨)
-#     저장소 명령이 있을 때의 이유: base 와 충돌한다 -- 따라잡기가 필요하다 (충돌 파일은 stderr) | rebase 가 패치를 바꿨다
+#     저장소 명령이 있을 때의 이유: base 와 충돌한다 -- 따라잡기가 필요하다 (충돌 파일은 stderr) | base 를 얹은 뒤 패치가 달라졌다
+#     | base 를 합치지 못했다: <git 오류 한 줄> (squash 에서 충돌 없이 merge 가 졌다. 출력은 stderr)
 #     | 검사 실패: <cmd> | 병합 전 명령이 실패했다: <cmd> | base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS)
 #     | PR 브랜치에 push 하지 못했다 (lease 거절이면 검수 뒤 남이 push 했다) | PR HEAD 가 올린 tip <sha> 이 되지 않았다(<HEAD>)
 #     | base <b> 를 받지 못했다 | 임시 worktree 를 만들지 못했다 | 임시 디렉터리를 만들지 못했다
@@ -198,33 +205,58 @@ hold() { # <명령이 이루면 land.sh 가 쥘 PR 브랜치 값, 비면 GitHub 
   "$@" || { held=$was; return 1; }
 }
 patch_ids() { git log -p -U0 --reverse "$1" | git patch-id --stable | cut -d' ' -f1; }
-repo_cmd() { # <명령> <rebase 된 tip>
+pr_diff_id() { # <rev> <base SHA> -- rev 의 PR 고유 diff(base 와의 merge-base 부터)의 patch-id. 비면 빈 값
+  local mb
+  mb=$(git merge-base "$1" "$2") || return 1
+  git diff -U0 "$mb" "$1" | git patch-id --stable | cut -d' ' -f1
+}
+repo_cmd() { # <명령> <착륙 tip>
   ( cd "$tree" && LAND_REPO=$repo LAND_PR=$pr LAND_BRANCH=$branch LAND_BASE=$tbase LAND_BASE_SHA=$base_sha \
       LAND_SHA=$reviewed LAND_HEAD=$2 sh -c "$1" ) >&2
 }
 build_tip() { # -> base_sha, tip
-  local rebased=$reviewed mb after
+  local landed=$reviewed mb after files line
   fetch_base || { out "BLOCKED #$pr base $tbase 를 받지 못했다"; exit 1; }
   base_sha=$fetched
   tree=$(bash "$(dirname "$0")/temp-tree.sh" add "$tmp_root/r$round" "$reviewed" | tail -1) \
     || { out "BLOCKED #$pr 임시 worktree 를 만들지 못했다"; exit 1; }
   if ! git merge-base --is-ancestor "$base_sha" "$reviewed"; then
-    mb=$(git merge-base "$reviewed" "$base_sha")
-    [ -z "$(git rev-list --merges "$mb..$reviewed")" ] || { out "BLOCKED #$pr rebase 가 패치를 바꿨다"; exit 1; }
-    if ! git -C "$tree" rebase -q "$base_sha" >&2; then
-      git -C "$tree" diff --name-only --diff-filter=U >&2
-      git -C "$tree" rebase --abort >&2
-      out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
-    fi
-    rebased=$(git -C "$tree" rev-parse HEAD)
-    after=$(patch_ids "$base_sha..$rebased")
-    [ -n "$after" ] && [ "$after" = "$(patch_ids "$mb..$reviewed")" ] || { out "BLOCKED #$pr rebase 가 패치를 바꿨다"; exit 1; }
+    case $method in
+      squash) # base 를 합친 tip, 고유 diff 판정. --no-ff: PR 이 base 의 조상이어도, merge.ff 설정이 어떻든 merge 커밋을 만든다.
+        # rebase 갈래처럼 commit-msg, pre-merge-commit 훅과 서명 검사를 거치지 않는다
+        if ! git -C "$tree" -c merge.verifySignatures=false merge --no-verify -q --no-ff --no-edit -m "Merge $tbase into $branch" "$base_sha" \
+          >&2 2>"$tmp_root/base.err"; then
+          cat "$tmp_root/base.err" >&2
+          files=$(git -C "$tree" diff --name-only --diff-filter=U)
+          git -C "$tree" merge --abort >&2
+          if [ -z "$files" ]; then
+            line=$(grep -v '^[[:space:]]*$' "$tmp_root/base.err" | tail -1)
+            out "BLOCKED #$pr base 를 합치지 못했다: $line"; exit 1
+          fi
+          printf '%s\n' "$files" >&2
+          out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
+        fi
+        landed=$(git -C "$tree" rev-parse HEAD)
+        after=$(pr_diff_id "$landed" "$base_sha")
+        [ -n "$after" ] && [ "$after" = "$(pr_diff_id "$reviewed" "$base_sha")" ] || { out "BLOCKED #$pr base 를 얹은 뒤 패치가 달라졌다"; exit 1; } ;;
+      *) # rebase 한 tip, 커밋 패치 판정
+        mb=$(git merge-base "$reviewed" "$base_sha")
+        [ -z "$(git rev-list --merges "$mb..$reviewed")" ] || { out "BLOCKED #$pr base 를 얹은 뒤 패치가 달라졌다"; exit 1; }
+        if ! git -C "$tree" rebase -q "$base_sha" >&2; then
+          git -C "$tree" diff --name-only --diff-filter=U >&2
+          git -C "$tree" rebase --abort >&2
+          out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
+        fi
+        landed=$(git -C "$tree" rev-parse HEAD)
+        after=$(patch_ids "$base_sha..$landed")
+        [ -n "$after" ] && [ "$after" = "$(patch_ids "$mb..$reviewed")" ] || { out "BLOCKED #$pr base 를 얹은 뒤 패치가 달라졌다"; exit 1; } ;;
+    esac
   fi
-  if [ -n "$check" ]; then repo_cmd "$check" "$rebased" || { out "BLOCKED #$pr 검사 실패: $check"; exit 1; }; fi
-  tip=$rebased
+  if [ -n "$check" ]; then repo_cmd "$check" "$landed" || { out "BLOCKED #$pr 검사 실패: $check"; exit 1; }; fi
+  tip=$landed
   if [ -n "$pre_merge" ]; then
-    repo_cmd "$pre_merge" "$rebased" && tip=$(git -C "$tree" rev-parse HEAD) && [ -z "$(git -C "$tree" status --porcelain)" ] \
-      && git merge-base --is-ancestor "$rebased" "$tip" || { out "BLOCKED #$pr 병합 전 명령이 실패했다: $pre_merge"; exit 1; }
+    repo_cmd "$pre_merge" "$landed" && tip=$(git -C "$tree" rev-parse HEAD) && [ -z "$(git -C "$tree" status --porcelain)" ] \
+      && git merge-base --is-ancestor "$landed" "$tip" || { out "BLOCKED #$pr 병합 전 명령이 실패했다: $pre_merge"; exit 1; }
   fi
   drop_tree
 }

@@ -39,7 +39,7 @@ description: >-
 | `pr-check.sh` | PR 모양: 열림, draft(`--draft`), 대상, HEAD 일치, 깨끗한 트리, 충돌, `Closes #N`, 금지 trailer, 금지 경로. 증거 판정: 판정 줄(`--verdict`), 이어 받기(`--carry`/`--may-touch`) -> EVIDENCE OK/RERUN | 7 |
 | `temp-tree.sh` | 던져 둘 사본(detached worktree) 만들기와 지우기. 의존성 symlink, 복사, 표식 파일 | 7, 리뷰어, 구현자 |
 | `mutate.sh` | 변이 하나를 걸고 시험을 돌린 뒤 되돌린다. KILLED/SURVIVED | 7, 리뷰어 |
-| `land.sh` | 기록을 이슈에 남기고, ready, 대상 변경, 병합(저장소 착륙 명령 또는 gh), 스택 앞 층 닫기, 뒷정리. 저장소 명령(검사, 병합 전)이 있으면 rebase, 패치 판정, 검사, 병합 전 커밋, base 이동 시 재시도 | 8 |
+| `land.sh` | 기록을 이슈에 남기고, ready, 대상 변경, 병합(저장소 착륙 명령 또는 gh), 스택 앞 층 닫기, 뒷정리. 저장소 명령(검사, 병합 전)이 있으면 착륙 tip(커밋 보존은 rebase 와 커밋 패치 판정, squash 는 base 를 merge 로 합치고 고유 diff 판정), 검사, 병합 전 커밋, base 이동 시 재시도 | 8 |
 | `wait-prs.sh` | 사람이 넣어야 하는 PR, 남의 PR 을 지켜본다 | 9 |
 
 ## 실행 전반의 원칙
@@ -164,16 +164,17 @@ bash "${CLAUDE_SKILL_DIR}/scripts/in-flight.sh" --where
 - **base**: 규칙이 정한 브랜치, 아니면 기본 브랜치.
 - **착륙**: 규칙이 정한 착륙 명령이 하나로 묶여 있으면 그것(`land.sh --via '<명령>'`), 검사와 병합 전 단계로 나뉘어 있으면
   저장소 명령(`--check '<검사 명령>'`, `--pre-merge '<병합 전 명령>'`, push 에만 줄 env 가 있으면 `--push-env K=V`)으로 준다.
-  저장소 명령이 있으면 `land.sh` 가 base 위로 rebase 하고 base 가 움직이면 다시 한다. 둘 다 없으면 gh 병합(아래 **병합**
+  저장소 명령이 있으면 `land.sh` 가 base 를 얹은 착륙 tip 을 만들고(아래 **병합** 이 커밋 보존이면 base 위로 rebase 하고,
+  squash 면 base 를 merge 로 합친다) base 가 움직이면 다시 한다. 둘 다 없으면 gh 병합(아래 **병합**
   방식. `Base branch was modified` 로 지면 `LAND_ROUNDS` 번까지 같은 HEAD 로 다시 한다). 착륙 명령이 PR 본문을 고쳐 쓰는지, draft 를 거부하는지, 커밋 메시지에서 `Closes` 를 모으는지 읽어 둔다.
 - **병합**: `rebase`, `squash`, `merge` 가운데 하나. 출처 우선순위는 실행 인자 > 저장소 규칙(`CLAUDE.md`/`AGENTS.md`) >
   사용자 상시 선호(전역 `CLAUDE.md`, 메모리) > GitHub 설정(허용된 것 가운데 rebase > squash > merge)이다. 설정은
   `gh repo view <o>/<r> --json rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed` 로 읽는다. 정한 방식을 설정이
   허용하지 않으면 쓰기 전에 `AskUserQuestion` 으로 묻는다(조용히 바꾸지 않는다). `--via` 면 방식은 규칙이 정하고, 없으면
   rebase 로 본다. 방식은 둘로 가른다. **커밋 보존**(rebase, merge)은 커밋을 정리해 다시 쓰고 rebase 로 따라잡는다(지금까지의
-  동작). **합침**(squash)은 커밋을 위에 쌓고, base 와 충돌하거나 보호 규칙이 최신을 요구할 때만 `git merge origin/<base>` 로
-  따라잡고 force-push 하지 않는다. 이 값 하나를 구현 지시문(6단계), 리뷰 지시문과 재리뷰(7단계), `pr-check.sh --closes-body`
-  (7단계 1항), `land.sh --method`(8단계)가 읽는다.
+  동작). **합침**(squash)은 커밋을 위에 쌓고, base 와 충돌하거나 보호 규칙이 최신을 요구하거나 `land.sh` 가 패치가 달라졌다고
+  알릴 때만 `git merge origin/<base>` 로 따라잡고 force-push 하지 않는다. 이 값 하나를 구현 지시문(6단계), 리뷰 지시문과
+  재리뷰(7단계), `pr-check.sh --closes-body` (7단계 1항), `land.sh --method`(8단계)가 읽는다.
 - **모양 규칙**: 규칙이 막는 커밋 trailer, 브랜치에서 고치면 안 되는 경로(버전, CHANGELOG 등)를 `pr-check.sh` 의
   `--forbid-trailer`/`--forbid-path` 로 옮긴다. **판정 무관 경로**(어떤 시험도 읽지 않는 경로: version 파일, CHANGELOG
   등)를 ERE 목록으로 정한다. 7단계 "걸림"의 재리뷰 예외 (ii) 가 `--may-touch` 로 쓴다. 시험이 읽는 문서(SKILL.md 를 읽는
@@ -400,11 +401,11 @@ worktree, PR 이 생기지 않게 한다.
   - 커밋 보존: `git log -p -U0 --reverse <mb>..<리뷰한 SHA> | git patch-id --stable` 과
     `git log -p -U0 --reverse <mb'>..HEAD | git patch-id --stable` 의 patch-id 열 목록(순서, 개수 포함)이 같다(`<mb>` 는
     `git merge-base <리뷰한 SHA> origin/<base>`, `<mb'>` 는 `git merge-base HEAD origin/<base>`). 범위에 merge 커밋이 있거나
-    한쪽이 비면 예외가 아니다. `land.sh` 의 패치 판정과 같은 명령이다.
+    한쪽이 비면 예외가 아니다. `land.sh` 의 커밋 패치 판정과 같은 명령이다.
   - 합침(squash): PR 고유 diff 의 patch-id 가 같다:
     `git diff -U0 $(git merge-base <리뷰한 SHA> origin/<base>) <리뷰한 SHA> | git patch-id --stable` 과
     `git diff -U0 $(git merge-base HEAD origin/<base>) HEAD | git patch-id --stable` 의 patch-id 열이 같다. 따라잡기 merge 커밋이
-    범위에 있어도 된다. 한쪽이 비면 예외가 아니다.
+    범위에 있어도 된다. 한쪽이 비면 예외가 아니다. `land.sh` 의 고유 diff 판정과 같은 명령이다.
 
 재리뷰는 1항 `SHAPE OK` 직후(예외 (ii) 는 1항의 `--carry` 로, (i) 은 `rev-parse`, (iii) 은 patch-id 비교로 직접) 3, 4항과 **나란히** 띄운다(새
 직렬 단계가 아니다). 대상은 커밋 보존이면 `리뷰한 SHA` 이후의 diff 다(base 가 움직였으면 `git range-diff`). 합침(squash)이면
@@ -456,7 +457,8 @@ worktree, PR 이 생기지 않게 한다.
 | `BLOCKED ... PR 이 열려 있지 않다(MERGED)` | 병합 뒤 정리 전에 끝났다. `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리하고 `LANDED` 처리를 한다. `(CLOSED)` 면 누가 닫았으니 사람에게 넘긴다 |
 | `BLOCKED ... 저장소가 <방식> 병합을 허용하지 않는다` | `--method` 로 준 방식을 저장소 설정이 막았다. 기록, 대상 변경, push, ready 전에 멈췄으니 PR 은 draft 그대로다. 0단계 `병합` 방식을 고치거나(규칙과 설정을 다시 읽는다) `AskUserQuestion` 으로 사람에게 묻고, 정한 방식으로 다시 부른다 |
 | `BLOCKED ... base 와 충돌한다 -- 따라잡기가 필요하다` | 따라잡기 요청(단계 `따라잡기`). 충돌 파일은 stderr 에 있다. 돌아오면 7단계 |
-| `BLOCKED ... rebase 가 패치를 바꿨다` | 따라잡기 요청(단계 `따라잡기`). 돌아오면 7단계(재리뷰가 기본). 0단계 `병합` 이 squash 이고 저장소 명령(`--check`, `--pre-merge`)으로 넣으면 따라잡기 merge 가 이 판정을 되풀이하니 사람에게 넘기고, 고리 모드의 squash 지원은 후속 이슈로 낸다(1단계) |
+| `BLOCKED ... base 를 합치지 못했다: <오류>` | squash 고리 모드에서 충돌 없이 base 를 합치는 merge 가 졌다(PR 탓이 아니다). 오류 줄과 stderr 를 읽고 저장소 설정, 훅, 디스크처럼 환경 탓이면 고쳐 같은 명령으로 다시 부르고, 네가 풀 수 없으면 사람에게 넘긴다 |
+| `BLOCKED ... base 를 얹은 뒤 패치가 달라졌다` | 따라잡기 요청(단계 `따라잡기`). 0단계 `병합` 이 squash 면 요청에 이 판정 줄을 적는다(구현자는 그때 `git merge origin/<base>` 로 따라잡는다). 돌아오면 7단계(재리뷰가 기본) |
 | `BLOCKED ... 검사 실패: <cmd>` | stderr 의 출력을 읽고 Fix(단계 `수정`). PR 은 draft 로 남아 있다 |
 | `BLOCKED ... 병합 전 명령이 실패했다: <cmd>` | stderr 의 출력을 읽는다. 저장소 쪽 일시 오류면 한 번 더, PR 탓이면 Fix(단계 `수정`) |
 | `BLOCKED ... base 가 움직여 <N>번 다시 했다` | 저장소 명령으로 넣을 때도, gh 로 넣을 때도 나온다. 한 번 더 부른다. 또 그러면 사람에게 넘긴다 |
@@ -468,7 +470,7 @@ worktree, PR 이 생기지 않게 한다.
 | `BLOCKED ... --via 를 돌릴 <branch> 의 worktree 가 없다` | PR 브랜치를 체크아웃한 worktree 가 없다. `git worktree add <경로> <branch>` 로 만들고 같은 명령으로 다시 부른다 |
 | `BLOCKED ... 병합되지 않았다(<state>) -- 정리하지 않는다` | `--cleanup` 을 병합 전에 불렀다. 9단계 지켜보기를 이어 가 MERGED 가 된 뒤 다시 부른다 |
 | `BLOCKED ... 착륙 명령이 실패했다` | 그 출력을 읽는다. 저장소 검사 실패면 Fix, 충돌이면 따라잡기, base 가 움직여 다시 하면 되는 것이면 한 번 더 |
-| `NEEDS_HUMAN #P ...` | 보호 규칙이 사람의 승인을 요구한다. 단계 `사람 병합 대기`, 9단계로 지켜본다. 저장소 명령으로 넣어 push 했으면(stderr 에 `land: 올린 tip` 줄이 있으면) PR HEAD 는 검수한 SHA 가 아니라 그 tip(사람이 넣을 rebase 와 병합 전 커밋)으로 남는다. 그때는 옛 `--sha` 로 `land.sh` 를 다시 부르지 않는다(`검수한 SHA 와 다르다` 로 멈추고, 그 행의 손 복원이 사람이 넣을 판을 지운다). 그 줄이 없으면(base 가 이미 조상이고 병합 전 커밋이 없었으면) 올린 것이 없어 PR HEAD 는 검수한 SHA 그대로다. 사람이 넣으면 `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리한다 |
+| `NEEDS_HUMAN #P ...` | 보호 규칙이 사람의 승인을 요구한다. 단계 `사람 병합 대기`, 9단계로 지켜본다. 저장소 명령으로 넣어 push 했으면(stderr 에 `land: 올린 tip` 줄이 있으면) PR HEAD 는 검수한 SHA 가 아니라 그 tip(사람이 넣을 착륙 tip 과 병합 전 커밋)으로 남는다. 그때는 옛 `--sha` 로 `land.sh` 를 다시 부르지 않는다(`검수한 SHA 와 다르다` 로 멈추고, 그 행의 손 복원이 사람이 넣을 판을 지운다). 그 줄이 없으면(base 가 이미 조상이고 병합 전 커밋이 없었으면) 올린 것이 없어 PR HEAD 는 검수한 SHA 그대로다. 사람이 넣으면 `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리한다 |
 
 넣은 뒤 진행 중인 다른 PR(병렬로 돌린 경우)이 같은 파일, 계약에 닿으면 사본에서 새 base 위로 올려 시험을 다시 돌리고,
 깨지면 Fix 로 돌려보낸다.

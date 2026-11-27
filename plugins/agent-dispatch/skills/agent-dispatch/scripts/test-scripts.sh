@@ -1425,19 +1425,56 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
 
 # 병합 방식은 0단계가 정하는 한 값이고, 2-8단계와 두 지시문은 그 값을 읽기만 한다. 줄바꿈을 한 칸으로 이어 구절을 찾는다.
 joined() { sed 's/^ *//' | tr '\n' ' '; }
+item_in() { # <파일> <절 머리 ERE> <항목 첫 줄 ERE> -- 그 절 안의 그 불릿 항목(다음 불릿이나 절 머리 앞까지)
+  awk -v s="$2" -v i="$3" '/^## / { in_s = ($0 ~ s); f = 0 } in_s && !f && $0 ~ i { f = 1; print; next } f && /^- \*\*/ { f = 0 } f' "$1"
+}
 case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블록, 7단계 --closes-body, 재리뷰와 예외 (iii), 8단계 --method, BLOCKED 행, 두 지시문, 용어
   local dir=$SCRIPTS/.. sk ib rb wt dc f sec all
   sk=$dir/SKILL.md ib=$dir/references/implement-brief.md rb=$dir/references/review-brief.md
   wt=$dir/references/watching.md dc=$dir/references/disciplines.md
-  # (a) 0단계 병합: 출처 우선순위, 허용하지 않으면 묻기, --via, 두 갈래
-  sec=$(awk '/^- \*\*병합\*\*:/ { f = 1; print; next } /^- \*\*/ || /^## / { f = 0 } f' "$sk" | joined)
-  [ -n "$sec" ] || bad "(a) 0단계에 '병합' 항목이 없다"
-  for f in '출처 우선순위는 실행 인자 > 저장소 규칙(`CLAUDE.md`/`AGENTS.md`) > 사용자 상시 선호(전역 `CLAUDE.md`, 메모리) > GitHub 설정(허용된 것 가운데 rebase > squash > merge)' \
-    'rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed' '허용하지 않으면 쓰기 전에 `AskUserQuestion` 으로 묻는다(조용히 바꾸지 않는다)' \
-    '`--via` 면 방식은 규칙이 정하고, 없으면 rebase 로 본다' '**커밋 보존**(rebase, merge)' '**합침**(squash)' \
-    '충돌하거나 보호 규칙이 최신을 요구할 때만 `git merge origin/<base>` 로 따라잡고 force-push 하지 않는다'; do
-    case $sec in *"$f"*) ;; *) bad "(a) 0단계 병합 항목에 '$f' 가 없다" ;; esac
-  done
+  local land_item=(
+    '- **착륙**: 규칙이 정한 착륙 명령이 하나로 묶여 있으면 그것(`land.sh --via '\''<명령>'\''`), 검사와 병합 전 단계로 나뉘어 있으면'
+    '  저장소 명령(`--check '\''<검사 명령>'\''`, `--pre-merge '\''<병합 전 명령>'\''`, push 에만 줄 env 가 있으면 `--push-env K=V`)으로 준다.'
+    '  저장소 명령이 있으면 `land.sh` 가 base 를 얹은 착륙 tip 을 만들고(아래 **병합** 이 커밋 보존이면 base 위로 rebase 하고,'
+    '  squash 면 base 를 merge 로 합친다) base 가 움직이면 다시 한다. 둘 다 없으면 gh 병합(아래 **병합**'
+    '  방식. `Base branch was modified` 로 지면 `LAND_ROUNDS` 번까지 같은 HEAD 로 다시 한다). 착륙 명령이 PR 본문을 고쳐 쓰는지, draft 를 거부하는지, 커밋 메시지에서 `Closes` 를 모으는지 읽어 둔다.'
+  )
+  local merge_item=(
+    '- **병합**: `rebase`, `squash`, `merge` 가운데 하나. 출처 우선순위는 실행 인자 > 저장소 규칙(`CLAUDE.md`/`AGENTS.md`) >'
+    '  사용자 상시 선호(전역 `CLAUDE.md`, 메모리) > GitHub 설정(허용된 것 가운데 rebase > squash > merge)이다. 설정은'
+    '  `gh repo view <o>/<r> --json rebaseMergeAllowed,squashMergeAllowed,mergeCommitAllowed` 로 읽는다. 정한 방식을 설정이'
+    '  허용하지 않으면 쓰기 전에 `AskUserQuestion` 으로 묻는다(조용히 바꾸지 않는다). `--via` 면 방식은 규칙이 정하고, 없으면'
+    '  rebase 로 본다. 방식은 둘로 가른다. **커밋 보존**(rebase, merge)은 커밋을 정리해 다시 쓰고 rebase 로 따라잡는다(지금까지의'
+    '  동작). **합침**(squash)은 커밋을 위에 쌓고, base 와 충돌하거나 보호 규칙이 최신을 요구하거나 `land.sh` 가 패치가 달라졌다고'
+    '  알릴 때만 `git merge origin/<base>` 로 따라잡고 force-push 하지 않는다. 이 값 하나를 구현 지시문(6단계), 리뷰 지시문과'
+    '  재리뷰(7단계), `pr-check.sh --closes-body` (7단계 1항), `land.sh --method`(8단계)가 읽는다.'
+  )
+  local keep_bullet=(
+    '  - 커밋 보존: `git log -p -U0 --reverse <mb>..<리뷰한 SHA> | git patch-id --stable` 과'
+    '    `git log -p -U0 --reverse <mb'\''>..HEAD | git patch-id --stable` 의 patch-id 열 목록(순서, 개수 포함)이 같다(`<mb>` 는'
+    '    `git merge-base <리뷰한 SHA> origin/<base>`, `<mb'\''>` 는 `git merge-base HEAD origin/<base>`). 범위에 merge 커밋이 있거나'
+    '    한쪽이 비면 예외가 아니다. `land.sh` 의 커밋 패치 판정과 같은 명령이다.'
+  )
+  local squash_bullet=(
+    '  - 합침(squash): PR 고유 diff 의 patch-id 가 같다:'
+    '    `git diff -U0 $(git merge-base <리뷰한 SHA> origin/<base>) <리뷰한 SHA> | git patch-id --stable` 과'
+    '    `git diff -U0 $(git merge-base HEAD origin/<base>) HEAD | git patch-id --stable` 의 patch-id 열이 같다. 따라잡기 merge 커밋이'
+    '    범위에 있어도 된다. 한쪽이 비면 예외가 아니다. `land.sh` 의 고유 diff 판정과 같은 명령이다.'
+  )
+  local patch_row='| `BLOCKED ... base 를 얹은 뒤 패치가 달라졌다` | 따라잡기 요청(단계 `따라잡기`). 0단계 `병합` 이 squash 면 요청에 이 판정 줄을 적는다(구현자는 그때 `git merge origin/<base>` 로 따라잡는다). 돌아오면 7단계(재리뷰가 기본) |'
+  local squash_header=(
+    '#   squash: rebase 하지 않고 git merge --no-ff <base> 로 base 를 합친 tip(rebase 처럼 commit-msg, pre-merge-commit 훅과'
+    '#   서명 검사를 거치지 않는다). 고유 diff 판정: <rev> 마다'
+    '#   git diff -U0 $(git merge-base <rev> <base>) <rev> | git patch-id --stable 의 patch-id 가 검수한 SHA 와 그 tip 에서 같아야 한다'
+    '#   (tip 쪽이 비어도 바뀐 것이다. 범위의 merge 커밋은 괜찮다).'
+  )
+  local tool_row='| `land.sh` | 기록을 이슈에 남기고, ready, 대상 변경, 병합(저장소 착륙 명령 또는 gh), 스택 앞 층 닫기, 뒷정리. 저장소 명령(검사, 병합 전)이 있으면 착륙 tip(커밋 보존은 rebase 와 커밋 패치 판정, squash 는 base 를 merge 로 합치고 고유 diff 판정), 검사, 병합 전 커밋, base 이동 시 재시도 | 8 |'
+  local needs_human_row='| `NEEDS_HUMAN #P ...` | 보호 규칙이 사람의 승인을 요구한다. 단계 `사람 병합 대기`, 9단계로 지켜본다. 저장소 명령으로 넣어 push 했으면(stderr 에 `land: 올린 tip` 줄이 있으면) PR HEAD 는 검수한 SHA 가 아니라 그 tip(사람이 넣을 착륙 tip 과 병합 전 커밋)으로 남는다. 그때는 옛 `--sha` 로 `land.sh` 를 다시 부르지 않는다(`검수한 SHA 와 다르다` 로 멈추고, 그 행의 손 복원이 사람이 넣을 판을 지운다). 그 줄이 없으면(base 가 이미 조상이고 병합 전 커밋이 없었으면) 올린 것이 없어 PR HEAD 는 검수한 SHA 그대로다. 사람이 넣으면 `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리한다 |'
+  local merge_fail_row='| `BLOCKED ... base 를 합치지 못했다: <오류>` | squash 고리 모드에서 충돌 없이 base 를 합치는 merge 가 졌다(PR 탓이 아니다). 오류 줄과 stderr 를 읽고 저장소 설정, 훅, 디스크처럼 환경 탓이면 고쳐 같은 명령으로 다시 부르고, 네가 풀 수 없으면 사람에게 넘긴다 |'
+  local land_head_line='# LAND_BASE_SHA(round 의 base) LAND_SHA(검수한 SHA, 40자) LAND_HEAD(착륙 tip).'
+  # (a) 0단계 착륙, 병합 항목 전체: 고리 모드의 착륙 tip 두 갈래, 출처 우선순위, 허용하지 않으면 묻기, --via, 두 갈래와 합침의 따라잡기 조건
+  exact_block '(a) 0단계 착륙 항목' "$(item_in "$sk" '^## 0[.] ' '^- [*][*]착륙[*][*]:')" "${land_item[@]}"
+  exact_block '(a) 0단계 병합 항목' "$(item_in "$sk" '^## 0[.] ' '^- [*][*]병합[*][*]:')" "${merge_item[@]}"
   # (b) 상태 블록: 병합 칸이 따로 있고 착륙 칸은 실행 경로만 적는다
   grep -qF ', 병합 <rebase|squash|merge>, ' "$sk" || bad "(b) 상태 블록에 '병합 <rebase|squash|merge>' 칸이 없다"
   grep -F '착륙 <--via' "$sk" | grep -qF 'gh <방식>' && bad "(b) 상태 블록 착륙 칸에 방식(gh <방식>)이 남아 있다"
@@ -1454,11 +1491,9 @@ case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블�
     '합침(squash)이면 `git diff <리뷰한 SHA>..HEAD` 가 아니라' 'Fix 나 따라잡기 뒤에는 **기본이 재리뷰다**'; do
     case $all in *"$f"*) ;; *) bad "(d) 7단계 걸림에 '$f' 가 없다" ;; esac
   done
-  f=$(printf '%s\n' "$sec" | awk '/^  - 커밋 보존:/ { f = 1 } /^  - 합침\(squash\):/ { f = 0 } f' | joined)
-  case $f in *'`git log -p -U0 --reverse <mb>..<리뷰한 SHA>'*'`land.sh` 의 패치 판정과 같은 명령이다'*) ;; *) bad "(d) 예외 (iii) 의 커밋 보존 갈래에 커밋 단위 명령과 land.sh 문장이 없다: $f" ;; esac
-  f=$(printf '%s\n' "$sec" | awk '/^  - 합침\(squash\):/ { f = 1 } /^$/ { f = 0 } f' | joined)
-  case $f in *'git patch-id --stable'*) ;; *) bad "(d) 예외 (iii) 에 합침(squash) 갈래가 없다" ;; esac
-  case $f in *'land.sh'*) bad "(d) 예외 (iii) 의 합침 갈래에 land.sh 문장이 있다: $f" ;; esac
+  # 두 갈래 불릿 전체: 각 갈래가 land.sh 의 어느 판정(커밋 패치 판정, 고유 diff 판정)과 같은 명령인지
+  exact_block '(d) 예외 (iii) 커밋 보존 갈래' "$(printf '%s\n' "$sec" | awk '/^  - 커밋 보존:/ { f = 1 } /^  - 합침\(squash\):/ { f = 0 } f')" "${keep_bullet[@]}"
+  exact_block '(d) 예외 (iii) 합침 갈래' "$(printf '%s\n' "$sec" | awk '/^  - 합침\(squash\):/ { f = 1 } /^$/ { f = 0 } f')" "${squash_bullet[@]}"
   # (e) 8단계 호출 틀은 --method 를 늘 넘기고(--via 와 둘 중 하나), 새 BLOCKED 행이 있다
   sec=$(awk '/^2\. 넣는다/ { f = 1 } f && /^3\. / { exit } f' "$sk" | joined)
   for f in '--evidence <기록 파일> (--method <0단계 병합> | --via '\''<착륙 명령>'\'')' '`--method` 는 언제나 0단계 `병합` 값을 준다'; do
@@ -1467,16 +1502,28 @@ case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블�
   f=$(grep -E '^\| `BLOCKED \.\.\. 저장소가 <방식> 병합을 허용하지 않는다` \|' "$sk" || true)
   [ -n "$f" ] || bad "(e) 8단계 표에 '저장소가 <방식> 병합을 허용하지 않는다' 행이 없다"
   case $f in *'0단계 `병합`'*'사람에게 묻'*) ;; *) bad "(e) 새 BLOCKED 행의 처리에 0단계 병합 방식 고치기나 사람에게 묻기가 없다: $f" ;; esac
-  f=$(grep -F '| `BLOCKED ... rebase 가 패치를 바꿨다` |' "$sk" || true)
-  case $f in *'0단계 `병합` 이 squash 이고 저장소 명령(`--check`, `--pre-merge`)으로 넣으면'*'사람에게 넘기고, 고리 모드의 squash 지원은 후속 이슈로 낸다'*) ;;
-    *) bad "(e) 'rebase 가 패치를 바꿨다' 행에 squash 고리 모드는 사람에게 넘긴다는 문장이 없다: $f" ;; esac
+  # 패치가 달라졌다 행은 8단계 표에 하나이고 통째로 같다. 옛 문구와 squash 고리 모드를 사람에게 넘기던 문장은 어디에도 없다
+  f=$(awk '/^## / { s = ($0 ~ /^## 8\./) } s' "$sk" | grep -F '| `BLOCKED ... base 를 얹은 뒤 패치가 달라졌다` |' || true)
+  [ "$f" = "$patch_row" ] || bad "(e) 8단계 표의 '패치가 달라졌다' 행이 기대한 글 하나가 아니다: $f"
+  all=$(cat "$sk" "$dir"/references/*.md "$SCRIPTS/land.sh")
+  for f in 'rebase 가 패치를 바꿨다' '고리 모드의 squash 지원은 후속 이슈' 'rebase 된 tip'; do
+    case $all in *"$f"*) bad "(e) '$f' 가 남아 있다" ;; esac
+  done
+  # 착륙 tip 두 갈래: 도구 표 land.sh 행, NEEDS_HUMAN 행, squash 의 합치지 못했다 행은 통째로, land.sh 헤더의 squash 갈래와 LAND_HEAD 줄도 통째로
+  f=$(grep -F '| `land.sh` |' "$sk" || true); [ "$f" = "$tool_row" ] || bad "(e) 도구 표의 land.sh 행이 기대한 글 하나가 아니다: $f"
+  f=$(awk '/^## / { s = ($0 ~ /^## 8\./) } s' "$sk" | grep -F '| `NEEDS_HUMAN #P ...` |' || true)
+  [ "$f" = "$needs_human_row" ] || bad "(e) 8단계 표의 NEEDS_HUMAN 행이 기대한 글 하나가 아니다: $f"
+  f=$(awk '/^## / { s = ($0 ~ /^## 8\./) } s' "$sk" | grep -F '| `BLOCKED ... base 를 합치지 못했다: <오류>` |' || true)
+  [ "$f" = "$merge_fail_row" ] || bad "(e) 8단계 표의 '합치지 못했다' 행이 기대한 글 하나가 아니다: $f"
+  exact_block '(e) land.sh 헤더 squash 갈래' "$(awk '/^#   squash: / { f = 1 } /^# 그다음 검사 명령/ { f = 0 } f' "$SCRIPTS/land.sh")" "${squash_header[@]}"
+  grep -qxF -- "$land_head_line" "$SCRIPTS/land.sh" || bad "(e) land.sh 헤더에 LAND_HEAD 를 착륙 tip 으로 적은 줄이 없다"
   # (f) 구현 지시문: 갈래 두 벌(Then 2, Follow-up), 합침 갈래의 문장, 커밋 보존 갈래는 그대로
   [ "$(grep -cF '<커밋 보존(rebase, merge)이면>' "$ib")" = 2 ] || bad "(f) implement-brief 의 커밋 보존 갈래가 두 곳(Then, Follow-up)이 아니다"
   [ "$(grep -cF '<합침(squash)이면>' "$ib")" = 2 ] || bad "(f) implement-brief 의 합침 갈래가 두 곳(Then, Follow-up)이 아니다"
   all=$(joined < "$ib")
   for f in 'Put **`Closes #<N>` in the last commit message** of the last PR' 'Put **`Closes #<N>` in the PR body** of the last PR' \
     'no `--fixup`' 'The PR title follows the repo'\''s commit convention' 'it becomes the commit title on `<base>`' \
-    'Merge `origin/<base>` only when it conflicts with your branch or the request says branch protection requires the branch to be up to date' \
+    'Merge `origin/<base>` only when it conflicts with your branch, the request says branch protection requires the branch to be up to date, or the request says `land.sh` reported `base 를 얹은 뒤 패치가 달라졌다`; otherwise do not catch up.' \
     'never force-push' 'rebase onto `origin/<base>` (never merge)' '`git push --force-with-lease`' '--autosquash' '**따라잡기**'; do
     case $all in *"$f"*) ;; *) bad "(f) implement-brief 에 '$f' 가 없다" ;; esac
   done
@@ -1563,7 +1610,7 @@ case_test_scope_static() { # implement-brief Then 2, 3, Follow-up, Report 블록
     '- **Fix** (review findings or a human'\''s PR feedback, each with evidence), **따라잡기** (base moved and your PR conflicts with it, or branch protection requires the branch to be up to date), **Next PR** (an earlier PR of this issue merged).'
     '- Fix/따라잡기 checks: narrow while you fix, the whole set once on the final SHA, as in Then 3. If `git rev-parse <final SHA>^{tree}` equals the tree of an earlier SHA on which you ran the whole set green, do not rerun it: name that SHA in your report (the orchestrator takes it over with `--carry`).'
     '- <커밋 보존(rebase, merge)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready; rebase onto `origin/<base>` (never merge), resolving each conflict so both sides survive; fix each item with a test where one can show it; fold fixes into the commit that introduced the problem; run the checks as the Fix/따라잡기 checks bullet says; `git push --force-with-lease`; update the PR body; report what changed (for a rebase: each conflicted file, resolved mechanically or by meaning) and the new SHA.'
-    '- <합침(squash)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready. Fix each item with a test where one can show it, as new commits on top. Merge `origin/<base>` only when it conflicts with your branch or the request says branch protection requires the branch to be up to date; otherwise do not catch up. When you merge, use `git merge origin/<base>` (never rebase), resolving each conflict so both sides survive. Then run the checks as the Fix/따라잡기 checks bullet says; push (never force-push); update the PR body; report what changed (for a merge: each conflicted file, resolved mechanically or by meaning, or that you did not catch up and why) and the new SHA.'
+    '- <합침(squash)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready. Fix each item with a test where one can show it, as new commits on top. Merge `origin/<base>` only when it conflicts with your branch, the request says branch protection requires the branch to be up to date, or the request says `land.sh` reported `base 를 얹은 뒤 패치가 달라졌다`; otherwise do not catch up. When you merge, use `git merge origin/<base>` (never rebase), resolving each conflict so both sides survive. Then run the checks as the Fix/따라잡기 checks bullet says; push (never force-push); update the PR body; report what changed (for a merge: each conflicted file, resolved mechanically or by meaning, or that you did not catch up and why) and the new SHA.'
     '- Next PR: start from the current `origin/<base>` in the same worktree and implement that PR'\''s part of the contract as above.'
     '- If you were stopped by a usage limit, or woken because you looked stalled, and told to continue: check whether your background runs finished and reuse their results; stop (`TaskStop`) any wait that can never end; rerun only what has none.'
   )
