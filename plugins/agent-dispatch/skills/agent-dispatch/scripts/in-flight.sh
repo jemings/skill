@@ -33,6 +33,9 @@
 # 흔적은 셋이다: 그 agent 의 기록 $CFG/projects/<proj>/<세션 id>/subagents/agent-<id>.jsonl, 그 기록에
 # "Output is being written to: <경로>.output" 으로 나온 task 출력 파일(그 agent 의 것만, 공용 tasks 디렉터리는 보지 않는다),
 # --path 아래 파일(node_modules, .git 은 뺀다). 기록은 `subagents/` 바로 아래 기록만 본다(더 깊은 workflow 기록은 UNKNOWN).
+# 경로 속 줄바꿈은 근거 줄에서 \n 두 글자로 보인다. 한계: 이름 속 줄바꿈 바로 뒤가 <숫자><공백><글자> 이면 따로 된 흔적 행으로 읽히고,
+# 이름 속 빈 줄과 끝 줄바꿈은 근거 줄에서 사라진다(이름으로 흔적을 위조할 수 있다. 우연한 이름을 위한 처리이고 악의적 이름은 막지 않는다.
+# 위조는 정체를 늦게 알릴 뿐 WORKING 을 STALLED 로 바꾸지 않는다).
 # 분은 기준 시각에서 지금까지다. 기준 시각은 가장 늦은 흔적의 mtime 이고, --after T(epoch 초, 깨운 시각)가 그보다
 # 늦으면 T 다. 그때 흔적 칸은 그대로 가장 늦은 흔적이고 근거 줄에 "기준 시각" 이 나온다.
 # 시계 차이 허용 오차는 300초다: mtime 이 지금과 지금+300 사이인 흔적은 지금으로 깎아 쓰고, 그보다 늦은 흔적은 판정에서 뺀다.
@@ -107,10 +110,14 @@ latest_row() { sort -n -k1,1 | tail -n 1; }
 stat_rows() { [ $# = 0 ] || stat "$stat_opt" "$stat_fmt" "$@" 2>/dev/null || true; }
 # 흔적 행을 지금($1) 기준의 도메인 값으로 바꾼다: 허용 오차 안의 미래는 지금으로 깎고, 그보다 늦은 행은 앞에 "F " 를 단다
 clamp_rows() {
-  awk -v now="$1" -v skew="$CLOCK_SKEW" 'NF == 0 { next }
-    $1 > now + skew { print "F " $0; next }
-    $1 > now { $0 = now substr($0, length($1) + 1) }
-    { print }'
+  awk -v now="$1" -v skew="$CLOCK_SKEW" 'function flush() { if (have) print out; have = 0 }
+    NF == 0 { next }
+    !($1 ~ /^[0-9]+$/ && NF >= 2) { if (have) out = out "\\n" $0; next }
+    { flush(); have = 1
+      if ($1 > now + skew) out = "F " $0
+      else if ($1 > now) out = now substr($0, length($1) + 1)
+      else out = $0 }
+    END { flush() }'
 }
 usable_rows() { awk 'NF && $1 != "F"'; }
 fmt_time() { jq -rn --argjson t "$1" '$t | strflocaltime("%Y-%m-%d %H:%M")'; }
@@ -124,10 +131,11 @@ task_outputs() {
 }
 # --path 아래 파일의 흔적 행(의존성, git 내부는 빼고)
 path_rows() {
-  local p
+  local p q
   for p in ${paths[@]+"${paths[@]}"}; do
     [ -e "$p" ] || continue
-    find "$p" \( -name node_modules -o -name .git \) -prune -o -type f -print0 2>/dev/null | xargs -0 stat "$stat_opt" "$stat_fmt" 2>/dev/null || true
+    case $p in /*) q=$p ;; *) q=./$p ;; esac
+    find "$q" \( -name node_modules -o -name .git \) -prune -o -type f -print0 2>/dev/null | xargs -0 stat "$stat_opt" "$stat_fmt" 2>/dev/null || true
   done
 }
 # --path 를 인자에 담은 살아 있는 프로세스. 감시(이 스크립트) 자신은 뺀다

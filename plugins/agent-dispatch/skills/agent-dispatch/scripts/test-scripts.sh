@@ -890,6 +890,61 @@ case_agent_future_mtime() { # 지금보다 미래인 흔적은 판정에서 빼�
   expect_out_has "    미래 시각 흔적 "
   expect_out_has "$AS/clock.log"
 }
+case_agent_trace_newline() { # 줄바꿈 든 파일 이름은 한 흔적 행으로 이어 붙고(\n 두 글자), 그 파일의 mtime 이 판정을 따른다
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"; mkdir "$AS/d"
+  local f="$AS/d/new
+line.txt" want
+  want="$AS/d/new\\nline.txt"
+  : > "$f"
+  run_agent a65 --path "$AS/d"
+  expect_rc 0; expect_err_empty
+  [ "$(first_line)" = "WORKING a65 0 $want" ] || bad "줄바꿈 이름: 첫 줄이 'WORKING a65 0 $want' 가 아니다: '$OUT'"
+  case $OUT in *'미래 시각 흔적'*) bad "줄바꿈 이름이 미래 시각 흔적 줄을 냈다: '$OUT'" ;; esac
+  stale "$f"
+  run_agent a65 --path "$AS/d"
+  expect_rc 0; expect_err_empty
+  case $(first_line) in "STALLED a65 "*" $want") ;; *) bad "낡은 줄바꿈 이름: 첫 줄이 'STALLED a65 <분> $want' 가 아니다: '$OUT'" ;; esac
+  age_secs -9999 "$f"
+  run_agent a65 --path "$AS/d"
+  expect_rc 0; expect_err_empty
+  printf '%s\n' "$OUT" | grep -F '    미래 시각 흔적 ' | grep -qF " $want" || bad "미래 줄바꿈 이름의 경로가 온전하지 않다: '$OUT'"
+}
+case_agent_trace_newline_joined() { # 이어진 줄이 숫자만이거나 숫자로 시작하지만 공백이 없거나 빈 줄이어도 한 흔적 행이다(빈 줄은 사라진다)
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"; mkdir "$AS/d"
+  local n want f
+  for n in 'x
+99999999999999999999999|x\n99999999999999999999999' 'new
+5x.txt|new\n5x.txt' 'new
+5x line.txt|new\n5x line.txt' 'new
+
+line.txt|new\nline.txt'; do
+    f="$AS/d/${n%%|*}" want="$AS/d/${n##*|}"
+    rm -rf "$AS/d"; mkdir "$AS/d"; : > "$f"
+    run_agent a65 --path "$AS/d"
+    expect_rc 0; expect_err_empty
+    [ "$(first_line)" = "WORKING a65 0 $want" ] || bad "첫 줄이 'WORKING a65 0 $want' 가 아니다: '$OUT'"
+    case $OUT in *'미래 시각 흔적'*) bad "'$want' 가 미래 시각 흔적 줄을 냈다: '$OUT'" ;; esac
+  done
+}
+case_agent_trace_dash_path() { # - 로 시작하는 --path 는 find 의 표현식이 아니라 경로로 읽는다
+  agent_setup; fake_agent_log; stale "$AGENT_LOG"
+  : > "$TMP/nogit/-newer"
+  run_agent a65 --path -newer
+  expect_rc 0; expect_err_empty
+  case $(first_line) in "WORKING a65 0 "*-newer) ;; *) bad "'-newer' --path: 첫 줄이 'WORKING a65 0 ...-newer' 가 아니다: '$OUT'" ;; esac
+  printf '%s\n' "$OUT" | grep -F '    가장 늦은 흔적 ' | grep -q -- '-newer$' || bad "가장 늦은 흔적이 -newer 가 아니다: '$OUT'"
+  rm -f "$TMP/nogit/-newer"
+  : > "$TMP/nogit/!"
+  run_agent a65 --path '!'
+  expect_rc 0; expect_err_empty
+  printf '%s\n' "$OUT" | grep -F '    가장 늦은 흔적 ' | grep -q -- '!$' || bad "가장 늦은 흔적이 ! 가 아니다: '$OUT'"
+  rm -f "$TMP/nogit/!"
+  : > "$TMP/nogit/("
+  run_agent a65 --path '('
+  expect_rc 0; expect_err_empty
+  printf '%s\n' "$OUT" | grep -F '    가장 늦은 흔적 ' | grep -q -- '($' || bad "가장 늦은 흔적이 ( 가 아니다: '$OUT'"
+  rm -f "$TMP/nogit/("
+}
 case_agent_future_skew() { # 흔적이 모두 몇 초 미래(시계 차이, 다른 파일 시스템)여도 허용 오차 안이면 지금으로 깎는다 -> WORKING 0
   agent_setup; fake_agent_log; age_secs -3 "$AGENT_LOG"
   run_agent a65
@@ -1074,7 +1129,7 @@ case_agent_prose_static() {
     case $w in *"$f"*) bad "in-flight.sh 의 --agent 절이 이식되지 않는 '$f' 를 쓴다" ;; esac
   done
   run_script native "$FLIGHT" -h
-  for f in 'in-flight.sh --agent <id> [--path <p>]... [--idle-min N] [--after T] [--wait [--interval S]]' '기준 시각' '미래 시각 흔적' '허용 오차는 300초' '깨움 뒤 응답 없음' '12자리' '6자리 안의 양의 정수가 아닌 --idle-min, --interval' '깨움 뒤 응답 판정 불가(<이유>)' '`subagents/` 바로 아래 기록만 본다' 'WORKING' 'STALLED' 'UNKNOWN' 'Output is being written to:'; do
+  for f in 'in-flight.sh --agent <id> [--path <p>]... [--idle-min N] [--after T] [--wait [--interval S]]' '기준 시각' '미래 시각 흔적' '허용 오차는 300초' '깨움 뒤 응답 없음' '12자리' '6자리 안의 양의 정수가 아닌 --idle-min, --interval' '깨움 뒤 응답 판정 불가(<이유>)' '경로 속 줄바꿈은 근거 줄에서' '<숫자><공백><글자>' '이름 속 빈 줄과 끝 줄바꿈은 근거 줄에서 사라진다' '이름으로 흔적을 위조할 수 있다' '우연한 이름을 위한 처리이고 악의적 이름은 막지 않는다.' '위조는 정체를 늦게 알릴 뿐 WORKING 을 STALLED 로 바꾸지 않는다' '`subagents/` 바로 아래 기록만 본다' 'WORKING' 'STALLED' 'UNKNOWN' 'Output is being written to:'; do
     expect_out_has "$f"
   done
 }
@@ -1683,6 +1738,9 @@ CASES=(
   'in-flight --agent --wait --after: 깨운 뒤 다시 건 감시는 그 시각부터 기다린다:case_agent_rearm_after_wake'
   'in-flight --agent --after: 흔적보다 늦으면 그 시각부터 센다:case_agent_after_old'
   'in-flight --agent: 미래 시각 흔적은 판정에서 뺀다:case_agent_future_mtime'
+  'in-flight --agent: 줄바꿈 든 파일 이름은 한 흔적 행이다:case_agent_trace_newline'
+  'in-flight --agent: 이어진 줄이 숫자뿐이거나 빈 줄이어도 한 흔적 행이다:case_agent_trace_newline_joined'
+  'in-flight --agent: - 로 시작하는 --path 도 흔적에 든다:case_agent_trace_dash_path'
   'in-flight --agent: 흔적이 모두 몇 초 미래면 지금으로 깎는다 -> WORKING:case_agent_future_skew'
   'in-flight --agent: 흔적이 모두 먼 미래면 UNKNOWN:case_agent_future_all'
   'in-flight --agent: 미래 시각 허용 오차 300초의 경계:case_agent_future_tolerance'
