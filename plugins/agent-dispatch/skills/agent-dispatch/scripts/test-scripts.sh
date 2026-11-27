@@ -1104,8 +1104,13 @@ case_agent_prose_static() {
     case $w in *"$f"*) ;; *) bad "6단계에 '$f' 가 없다" ;; esac
   done
   w=$(awk '/^   - \(a\) \*\*재실행\*\*/ { f = 1; print; next } f && /^   - \(b\)/ { f = 0 } f' "$sk")
-  for f in '`run_in_background`' '`( ... & )`' '`timeout`' '`**Waiting**`' '그 실행의 로그 경로'; do
+  for f in '`run_in_background`' '`( ... & )`' '`timeout`' '`**Waiting**`' '그 실행의 로그 경로' '마지막이' '기다리거나 `TaskStop` 하고' '멈춘 것을 리포트에 적어'; do
     case $w in *"$f"*) ;; *) bad "7단계 3항 (a) 에 '$f' 가 없다" ;; esac
+  done
+  w=$(awk '/^  - \*\*리포트 뒤의 알림\*\*/ { f = 1 } /^    근거:/ { f = 0 } f' "$sk")
+  for f in '`has not reported yet` 이면 위 감시와 판정 규칙을 따른다' '`report was delivered` 이고 `still running` 이면' \
+           '**그 agent id 로 `TaskStop`** 을 리포트마다 한 번 한다' '`No task found` 는 이미 끝난 것이니 무시한다' '`SendMessage` 가 agent 를 다시 깨우고'; do
+    case $w in *"$f"*) ;; *) bad "알림 절 규칙에 '$f' 가 없다" ;; esac
   done
   awk '/^## 9\./ { f = 1; next } f' "$sk" | grep -F '일하는 중' | grep -qF -- '--agent' || bad "9단계에 '일하는 중' 의 --agent 판정 근거가 없다"
   w=$(awk '/^\*\*상태 블록\*\*/ { f = 1 } f && /^진행 목록:/ { g = 1 } g && /^```$/ { exit } g' "$sk")
@@ -1116,10 +1121,16 @@ case_agent_prose_static() {
     w=$(grep -F -- '- **Waiting**:' "$f" || true)
     [ -n "$w" ] || { bad "$(basename "$f") 에 Waiting 줄이 없다"; continue; }
     for sec in '`run_in_background` on the command itself' '`( ... & )`' 'polls a log' 'bound it with `timeout`' \
-               'ends when the awaited run ends' 'takes precedence over any tool' 'what you wait for and when it should end, with the log path of that run'; do
+               'ends when the awaited run ends' 'takes precedence over any tool' 'what you wait for and when it should end, with the log path of that run' \
+               'not your last' 'before you send it' 'leave nothing running'; do
       case $w in *"$sec"*) ;; *) bad "$(basename "$f") 의 Waiting 줄에 '$sec' 가 없다" ;; esac
     done
   done
+  w=$(grep -F -- '- **Waiting**:' "$dir/references/grill-brief.md" || true)
+  for f in "$ib" "$dir/references/review-brief.md"; do
+    [ "$(grep -F -- '- **Waiting**:' "$f" || true)" = "$w" ] || bad "$(basename "$f") 의 Waiting 줄이 grill-brief 와 바이트 단위로 같지 않다"
+  done
+  case $w in *'Your last act is the report: before you send it, wait for every background run you started to end or stop it (TaskStop), say in the report which runs you stopped and why, and leave nothing running.'*) ;; *) bad "Waiting 줄에 마지막 문장이 통째로 없다" ;; esac
   grep -F 'and told to continue' "$ib" | grep -qF 'woken because you looked stalled' || bad "implement-brief 의 이어 하기 줄에 정체로 깨웠을 때가 없다"
   grep -F 'Your scratch directory' "$ib" | grep -qF '`<scratch>`' || bad "implement-brief 에 <scratch> 를 정하는 줄이 없다"
   grep -F '감시' "$dir/references/watching.md" | grep -F 'wait-prs.sh' | grep -qF '따로 센다' || bad "watching.md 에 감시는 따로 센다는 줄이 없다"
