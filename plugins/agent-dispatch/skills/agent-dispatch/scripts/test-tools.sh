@@ -585,17 +585,31 @@ t_land_loop_conflict() { # rebase 가 충돌하면 되돌리고 충돌 파일을
   printf '%s\n' "$ERR" | grep -qx b || bad "stderr 에 충돌 파일 b 가 한 줄로 없다: $ERR"
   expect_no_temp; expect_pr_branch "$HEAD_SHA"
 }
-t_land_loop_rebase_fails() { # 충돌 없이 rebase 가 지면(prepare-commit-msg 훅이 거절) 충돌이 아닌 이유로 BLOCKED, 임시 worktree 를 남기지 않는다
+t_land_loop_rebase_fails() { # 충돌 없이 rebase 가 지면(prepare-commit-msg 훅이 거절) 충돌이 아닌 이유로 BLOCKED, 임시 worktree 를 남기지 않는다. error: 앞의 훅 줄은 건너뛴다
   loop_setup; base_commit d d; reject_hook prepare-commit-msg; mkdir "$T/tmp"
   LC_ALL=C TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
   expect_rc 1; expect_not "충돌"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"; expect_no_temp
   expect_last "BLOCKED #7 base 를 합치지 못했다: error: 'prepare-commit-msg' hook failed"
   expect_err "hook: rejected"
 }
-t_land_loop_base_fail_no_cause() { # error:/fatal: 줄이 없는 실패(빈 줄로 시작, 비공백 줄 둘 이상)면 첫 비공백 줄로 떨어진다
-  loop_setup; base_commit d d; mkdir "$T/tmp" "$T/bin"
-  printf '#!/bin/sh\nfor a in "$@"; do\n  case $a in --abort) exit 0 ;; rebase) printf "\\n  \\ncause line\\n\\nadvice line\\n\\n" >&2; exit 1 ;; esac\ndone\nexec %s "$@"\n' "$(command -v git)" > "$T/bin/git"
+stub_rebase_fail() { # <printf 서식> -- rebase 만 그 stderr 를 찍고 지는 git 을 PATH 앞에 둔다(--abort 는 조용히 성공)
+  mkdir "$T/bin"
+  printf '#!/bin/sh\nfor a in "$@"; do\n  case $a in --abort) exit 0 ;; rebase) printf "%s" >&2; exit 1 ;; esac\ndone\nexec %s "$@"\n' "$1" "$(command -v git)" > "$T/bin/git"
   chmod +x "$T/bin/git"
+}
+t_land_loop_base_fail_hook_error() { # 훅이 error: 원인을 찍으면 git 이 뒤에 붙인 일반 error: 줄이 아니라 그 첫 error: 줄이 실린다
+  loop_setup; base_commit d d; reject_hook prepare-commit-msg; mkdir "$T/tmp"
+  printf '#!/bin/sh\necho "error: hook says no" >&2\nexit 1\n' > "$T/hooks/prepare-commit-msg"
+  LC_ALL=C TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 base 를 합치지 못했다: error: hook says no"; expect_not_called "pr merge"; expect_no_temp
+}
+t_land_loop_base_fail_first_error() { # 줄머리 error:/fatal: 중 첫 줄을 고른다(줄머리가 아닌 error:, warning:, hint: 는 건너뛴다)
+  loop_setup; base_commit d d; mkdir "$T/tmp"; stub_rebase_fail 'warning: w\nx error: not a cause\nfatal: real cause\nerror: later\nhint: h\n'
+  PATH=$T/bin:$PATH TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
+  expect_rc 1; expect_last "BLOCKED #7 base 를 합치지 못했다: fatal: real cause"; expect_not_called "pr merge"; expect_no_temp
+}
+t_land_loop_base_fail_no_cause() { # error:/fatal: 줄이 없는 실패(빈 줄로 시작, 비공백 줄 둘 이상)면 첫 비공백 줄로 떨어진다
+  loop_setup; base_commit d d; mkdir "$T/tmp"; stub_rebase_fail '\n  \ncause line\n\nadvice line\n\n'
   PATH=$T/bin:$PATH TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --check true
   expect_rc 1; expect_last "BLOCKED #7 base 를 합치지 못했다: cause line"; expect_not_called "pr merge"; expect_no_temp
 }
@@ -910,7 +924,7 @@ t_missing_case_fn() {
 
 CASES='land_gh land_head_moved land_conflict land_unknown_then_ok land_needs_human land_merge_fail land_gh_transient land_gh_transient_limit land_gh_retry_mergeable land_gh_rounds_arg land_gh_head_modified land_loop_head_modified land_method_squash land_method_explicit land_method_disallowed land_method_merge land_method_unreadable
 land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup land_args
-land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_rebase_fails land_loop_base_fail_no_cause land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
+land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_rebase_fails land_loop_base_fail_hook_error land_loop_base_fail_first_error land_loop_base_fail_no_cause land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
 land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
 land_loop_base land_loop_unknown land_loop_base_rewound land_loop_patch_count land_loop_hn_nopush
 land_loop_squash_catchup land_loop_squash_ancestor land_loop_squash_absorbed land_loop_squash_conflict land_loop_squash_retry

@@ -214,13 +214,13 @@ repo_cmd() { # <명령> <착륙 tip>
   ( cd "$tree" && LAND_REPO=$repo LAND_PR=$pr LAND_BRANCH=$branch LAND_BASE=$tbase LAND_BASE_SHA=$base_sha \
       LAND_SHA=$reviewed LAND_HEAD=$2 sh -c "$1" ) >&2
 }
-base_failed() { # <merge|rebase> -- base 를 얹다 진 git 을 되돌리고, 충돌 파일이 있으면 충돌로, 없으면 git 의 error:/fatal: 원인 줄(없으면 첫 비공백 줄)로 BLOCKED
+base_failed() { # <merge|rebase> -- base 를 얹다 진 git 을 되돌리고, 충돌 파일이 있으면 충돌로, 없으면 git 의 첫 error:/fatal: 원인 줄(없으면 첫 비공백 줄)로 BLOCKED
   local files line
   cat "$tmp_root/base.err" >&2
   files=$(git -C "$tree" diff --name-only --diff-filter=U)
   git -C "$tree" "$1" --abort >&2
   if [ -z "$files" ]; then
-    line=$(grep -E '^(error|fatal): ' "$tmp_root/base.err" | tail -1)
+    line=$(grep -E '^(error|fatal): ' "$tmp_root/base.err" | head -1)
     [ -n "$line" ] || line=$(grep -v '^[[:space:]]*$' "$tmp_root/base.err" | head -1)
     out "BLOCKED #$pr base 를 합치지 못했다: $line"; exit 1
   fi
