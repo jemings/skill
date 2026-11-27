@@ -276,6 +276,27 @@ t_check_forbid_rename() { # 금지 경로를 이름 바꾸기로 옮겨도 옛 �
   run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --forbid-path '^a$'
   expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL 바뀐 파일"
 }
+t_check_closes_body() { # --closes-body: Closes 를 커밋 메시지 대신 PR 본문에서 찾는다
+  setup_repo; git -C "$T/wt" fetch -q origin
+  git -C "$T/wt" commit -q --amend -m "feat: b"; HEAD_SHA=$(git -C "$T/wt" rev-parse HEAD); pr 7 headRefOid="$HEAD_SHA" body="무엇을 고쳤나
+
+Closes #5"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 0; expect_last "SHAPE OK"; expect_has "OK Closes #5"; expect_called "--json body"
+  pr 7 body="본문에는 없다"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL Closes: PR 본문에"
+  setup_repo; git -C "$T/wt" fetch -q origin; pr 7 body="본문에는 없다"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL Closes: PR 본문에"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5
+  expect_rc 0; expect_has "OK Closes #5"
+  touch "$ST/fail_json_body"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes 5 --closes-body
+  expect_rc 1; expect_last "SHAPE FAIL"; expect_has "FAIL Closes: PR 본문을 읽지 못했다"
+  run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt" --closes-body
+  expect_rc 2; expect_err "--closes-body"; expect_not "SHAPE"
+}
 t_check_unknown() {
   setup_repo; git -C "$T/wt" fetch -q origin; pr 7 mergeable=UNKNOWN; printf 'UNKNOWN\nMERGEABLE\n' > "$ST/mseq_7"
   run pr-check.sh --repo o/r --pr 7 --worktree "$T/wt"; expect_rc 0; expect_has "OK 충돌 없음"
@@ -796,7 +817,7 @@ land_via land_via_fails land_via_not_merged land_stack land_keep land_cleanup la
 land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict land_loop_patch land_loop_rounds land_loop_push_env land_loop_needs_human land_loop_args land_loop_lease land_loop_merged_keeps_tip land_loop_transient_counts land_loop_delete_no_env land_loop_merge_commit land_loop_premerge_bad land_loop_rounds_arg land_loop_env land_loop_conflicting land_loop_term_on_push land_loop_term_on_poll land_loop_term_in_merge
 land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
 land_loop_base land_loop_unknown land_loop_base_rewound land_loop_patch_count land_loop_hn_nopush
-check_ok check_fails check_forbid_rename check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
+check_ok check_fails check_forbid_rename check_closes_body check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
 check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
 check_carry_ref check_carry_wide_ere check_carry_bad_ere check_carry_rename check_carry_nonascii check_carry_two tree_roundtrip tree_refuses

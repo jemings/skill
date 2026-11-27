@@ -2,13 +2,14 @@
 # pr-check.sh -- PR 의 모양을 본다(agent-dispatch 7단계 1항). 시험을 돌리기 전, 리뷰어를 띄우기 전에 돌린다.
 # 시험 결과를 PR HEAD 의 증거로 받을 수 있는지도 판정한다(7단계 3항, 걸림).
 #
-#   pr-check.sh --repo O/R --pr P --worktree W [--base B] [--sha S] [--closes N] [--draft] [--forbid-trailer ERE]... [--forbid-path ERE]...
+#   pr-check.sh --repo O/R --pr P --worktree W [--base B] [--sha S] [--closes N [--closes-body]] [--draft] [--forbid-trailer ERE]... [--forbid-path ERE]...
 #               [--verdict LOG=TEXT]... [--carry SHA [--may-touch ERE]...]...
 #
 #   --worktree W        그 PR 브랜치의 worktree. HEAD 와 작업 트리를 본다
 #   --base B            대상 브랜치(기본: 저장소의 기본 브랜치). stacked PR 의 위층이면 앞 층의 브랜치를 준다
 #   --sha S             구현자가 보고한 시험 SHA. PR HEAD 와 같아야 한다
 #   --closes N          base 이후 커밋 메시지 가운데 하나에 "Closes #N"(Fixes, Resolves 도)이 있어야 한다
+#   --closes-body       --closes 의 "Closes #N" 을 커밋 메시지 대신 PR 본문에서 찾는다. --closes 와 함께 준다
 #   --draft             PR 이 draft 여야 한다(검수 중인 PR 은 draft 다). 주지 않으면 draft 여부를 보지 않는다
 #   --forbid-trailer E  base 이후 커밋 메시지에 E 에 맞는 줄이 있으면 안 된다(예: '^Co-Authored-By:')
 #   --forbid-path E     base 이후 바뀐 파일 경로가 E 에 맞으면 안 된다(예: '^CHANGELOG\.md$')
@@ -35,7 +36,7 @@ die() { echo "pr-check: $*" >&2; exit 2; }
 usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; print }' "$0" | sed 's/^# \{0,1\}//'; }
 value() { [ -n "${2:-}" ] || die "$1 에 값을 줘라"; }
 
-repo='' pr='' wt='' base='' sha='' closes='' draft=0
+repo='' pr='' wt='' base='' sha='' closes='' closes_body=0 draft=0
 trailers=() paths=() verdicts=() carries=() nl=$'\n' cr=$'\r'
 while [ $# -gt 0 ]; do
   case $1 in
@@ -45,6 +46,7 @@ while [ $# -gt 0 ]; do
     --base) value "$@"; base=$2; shift 2 ;;
     --sha) value "$@"; sha=$2; shift 2 ;;
     --closes) value "$@"; closes=$2; shift 2 ;;
+    --closes-body) closes_body=1; shift ;;
     --draft) draft=1; shift ;;
     --forbid-trailer) value "$@"; trailers+=("$2"); shift 2 ;;
     --forbid-path) value "$@"; paths+=("$2"); shift 2 ;;
@@ -68,6 +70,7 @@ done
 [[ $pr =~ ^[0-9]+$ ]] || die "--pr 에 PR 번호를 줘라"
 [ -d "$wt" ] || die "--worktree 가 없다: '$wt'"
 [ -z "$closes" ] || [[ $closes =~ ^[0-9]+$ ]] || die "--closes 는 번호다: $closes"
+[ "$closes_body" = 0 ] || [ -n "$closes" ] || die "--closes-body 는 --closes 와 함께 준다"
 for c in ${carries[@]+"${carries[@]}"}; do
   git -C "$wt" rev-parse -q --verify "${c%%"$nl"*}^{commit}" >/dev/null || die "--carry 가 커밋이 아니다: ${c%%"$nl"*}"
 done
@@ -76,6 +79,10 @@ POLL=${PR_CHECK_POLL:-10} TRIES=${PR_CHECK_TRIES:-12}
 fails=0
 ok() { echo "OK $1"; }
 fail() { echo "FAIL $1: $2"; fails=$((fails + 1)); }
+check_closes() { # <찾은 곳> <글>
+  printf '%s\n' "$2" | grep -qiE "(close[sd]?|fix(e[sd])?|resolve[sd]?) +#$closes\b" \
+    && ok "Closes #$closes" || fail "Closes" "$1에 'Closes #$closes' 가 없다"
+}
 
 view() { gh pr view "$pr" --repo "$repo" --json "$1" --jq "$2"; }
 info=$(view state,headRefOid,baseRefName,mergeable '[.state, .headRefOid, .baseRefName, .mergeable] | join(" ")') \
@@ -124,10 +131,7 @@ else
   behind=$(git -C "$wt" rev-list --count "HEAD..$remote_base")
   echo "INFO 커밋 $(git -C "$wt" rev-list --count "$mb..HEAD")개, $remote_base 보다 ${behind}개 뒤"
   msgs=$(git -C "$wt" log --format=%B "$mb..HEAD")
-  if [ -n "$closes" ]; then
-    printf '%s\n' "$msgs" | grep -qiE "(close[sd]?|fix(e[sd])?|resolve[sd]?) +#$closes\b" \
-      && ok "Closes #$closes" || fail "Closes" "커밋 메시지에 'Closes #$closes' 가 없다"
-  fi
+  if [ -n "$closes" ] && [ "$closes_body" = 0 ]; then check_closes '커밋 메시지' "$msgs"; fi
   for e in ${trailers[@]+"${trailers[@]}"}; do
     hit=$(printf '%s\n' "$msgs" | grep -E "$e" | head -1)
     [ -z "$hit" ] && ok "커밋 메시지에 /$e/ 없음" || fail "커밋 메시지" "/$e/ 에 맞는 줄: $hit"
@@ -139,6 +143,10 @@ else
       [ -z "$hit" ] && ok "바뀐 파일에 /$e/ 없음" || fail "바뀐 파일" "/$e/ 에 맞는 파일: $hit"
     done
   fi
+fi
+
+if [ -n "$closes" ] && [ "$closes_body" = 1 ]; then
+  if body=$(view body .body); then check_closes 'PR 본문' "$body"; else fail "Closes" "PR 본문을 읽지 못했다"; fi
 fi
 
 # 증거 판정: 시험 결과를 PR HEAD 의 것으로 받을 수 있나. PR 결함이 아니므로 fails 에 세지 않는다
