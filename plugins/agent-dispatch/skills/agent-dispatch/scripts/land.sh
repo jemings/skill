@@ -51,7 +51,7 @@
 #   LANDED #P <병합 커밋> [ISSUE #N OPEN|CLOSED]   exit 0
 #   BLOCKED #P <이유>                               exit 1  (HEAD 가 바뀜, 충돌, 착륙 명령 실패, 병합 안 됨)
 #     저장소 명령이 있을 때의 이유: base 와 충돌한다 -- 따라잡기가 필요하다 (충돌 파일은 stderr) | base 를 얹은 뒤 패치가 달라졌다
-#     | base 를 합치지 못했다: <git 오류 한 줄> (squash 에서 충돌 없이 merge 가 졌다. 출력은 stderr)
+#     | base 를 합치지 못했다: <git 오류 한 줄> (rebase 나 squash 의 merge 가 충돌 파일 없이 졌다. 출력은 stderr)
 #     | 검사 실패: <cmd> | 병합 전 명령이 실패했다: <cmd> | base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS)
 #     | PR 브랜치에 push 하지 못했다 (lease 거절이면 검수 뒤 남이 push 했다) | PR HEAD 가 올린 tip <sha> 이 되지 않았다(<HEAD>)
 #     | base <b> 를 받지 못했다 | 임시 worktree 를 만들지 못했다 | 임시 디렉터리를 만들지 못했다
@@ -214,8 +214,20 @@ repo_cmd() { # <명령> <착륙 tip>
   ( cd "$tree" && LAND_REPO=$repo LAND_PR=$pr LAND_BRANCH=$branch LAND_BASE=$tbase LAND_BASE_SHA=$base_sha \
       LAND_SHA=$reviewed LAND_HEAD=$2 sh -c "$1" ) >&2
 }
+base_failed() { # <merge|rebase> -- base 를 얹다 진 git 을 되돌리고, 충돌 파일이 있으면 충돌로, 없으면 git 오류 한 줄로 BLOCKED
+  local files line
+  cat "$tmp_root/base.err" >&2
+  files=$(git -C "$tree" diff --name-only --diff-filter=U)
+  git -C "$tree" "$1" --abort >&2
+  if [ -z "$files" ]; then
+    line=$(grep -v '^[[:space:]]*$' "$tmp_root/base.err" | tail -1)
+    out "BLOCKED #$pr base 를 합치지 못했다: $line"; exit 1
+  fi
+  printf '%s\n' "$files" >&2
+  out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
+}
 build_tip() { # -> base_sha, tip
-  local landed=$reviewed mb after files line
+  local landed=$reviewed mb after
   fetch_base || { out "BLOCKED #$pr base $tbase 를 받지 못했다"; exit 1; }
   base_sha=$fetched
   tree=$(bash "$(dirname "$0")/temp-tree.sh" add "$tmp_root/r$round" "$reviewed" | tail -1) \
@@ -226,15 +238,7 @@ build_tip() { # -> base_sha, tip
         # rebase 갈래처럼 commit-msg, pre-merge-commit 훅과 서명 검사를 거치지 않는다
         if ! git -C "$tree" -c merge.verifySignatures=false merge --no-verify -q --no-ff --no-edit -m "Merge $tbase into $branch" "$base_sha" \
           >&2 2>"$tmp_root/base.err"; then
-          cat "$tmp_root/base.err" >&2
-          files=$(git -C "$tree" diff --name-only --diff-filter=U)
-          git -C "$tree" merge --abort >&2
-          if [ -z "$files" ]; then
-            line=$(grep -v '^[[:space:]]*$' "$tmp_root/base.err" | tail -1)
-            out "BLOCKED #$pr base 를 합치지 못했다: $line"; exit 1
-          fi
-          printf '%s\n' "$files" >&2
-          out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
+          base_failed merge
         fi
         landed=$(git -C "$tree" rev-parse HEAD)
         after=$(pr_diff_id "$landed" "$base_sha")
@@ -242,10 +246,8 @@ build_tip() { # -> base_sha, tip
       *) # rebase 한 tip, 커밋 패치 판정
         mb=$(git merge-base "$reviewed" "$base_sha")
         [ -z "$(git rev-list --merges "$mb..$reviewed")" ] || { out "BLOCKED #$pr base 를 얹은 뒤 패치가 달라졌다"; exit 1; }
-        if ! git -C "$tree" rebase -q "$base_sha" >&2; then
-          git -C "$tree" diff --name-only --diff-filter=U >&2
-          git -C "$tree" rebase --abort >&2
-          out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
+        if ! git -C "$tree" rebase -q "$base_sha" >&2 2>"$tmp_root/base.err"; then
+          base_failed rebase
         fi
         landed=$(git -C "$tree" rev-parse HEAD)
         after=$(patch_ids "$base_sha..$landed")
