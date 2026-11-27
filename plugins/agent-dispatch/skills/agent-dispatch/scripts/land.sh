@@ -27,7 +27,8 @@
 #   커밋 보존(rebase, merge): base 위로 rebase 한 tip. 커밋 패치 판정: mb=$(git merge-base <검수한 SHA> <base>) 로
 #   git log -p -U0 --reverse <mb>..<검수한 SHA> | git patch-id --stable 의 patch-id 열 목록이 rebase 한 tip 쪽과 같아야 한다
 #   (범위에 merge 커밋이 있거나 rebase 뒤 범위가 비어도 바뀐 것이다).
-#   squash: rebase 하지 않고 git merge --no-ff <base> 로 base 를 합친 tip. 고유 diff 판정: <rev> 마다
+#   squash: rebase 하지 않고 git merge --no-ff <base> 로 base 를 합친 tip(rebase 처럼 commit-msg, pre-merge-commit 훅과
+#   서명 검사를 거치지 않는다). 고유 diff 판정: <rev> 마다
 #   git diff -U0 $(git merge-base <rev> <base>) <rev> | git patch-id --stable 의 patch-id 가 검수한 SHA 와 그 tip 에서 같아야 한다
 #   (tip 쪽이 비어도 바뀐 것이다. 범위의 merge 커밋은 괜찮다).
 # 그다음 검사 명령, 병합 전 명령을 돌리고, tip 이 PR HEAD 와
@@ -50,6 +51,7 @@
 #   LANDED #P <병합 커밋> [ISSUE #N OPEN|CLOSED]   exit 0
 #   BLOCKED #P <이유>                               exit 1  (HEAD 가 바뀜, 충돌, 착륙 명령 실패, 병합 안 됨)
 #     저장소 명령이 있을 때의 이유: base 와 충돌한다 -- 따라잡기가 필요하다 (충돌 파일은 stderr) | base 를 얹은 뒤 패치가 달라졌다
+#     | base 를 합치지 못했다: <git 오류 한 줄> (squash 에서 충돌 없이 merge 가 졌다. 출력은 stderr)
 #     | 검사 실패: <cmd> | 병합 전 명령이 실패했다: <cmd> | base 가 움직여 <N>번 다시 했다 (N 은 LAND_ROUNDS)
 #     | PR 브랜치에 push 하지 못했다 (lease 거절이면 검수 뒤 남이 push 했다) | PR HEAD 가 올린 tip <sha> 이 되지 않았다(<HEAD>)
 #     | base <b> 를 받지 못했다 | 임시 worktree 를 만들지 못했다 | 임시 디렉터리를 만들지 못했다
@@ -213,17 +215,25 @@ repo_cmd() { # <명령> <착륙 tip>
       LAND_SHA=$reviewed LAND_HEAD=$2 sh -c "$1" ) >&2
 }
 build_tip() { # -> base_sha, tip
-  local landed=$reviewed mb after
+  local landed=$reviewed mb after files line
   fetch_base || { out "BLOCKED #$pr base $tbase 를 받지 못했다"; exit 1; }
   base_sha=$fetched
   tree=$(bash "$(dirname "$0")/temp-tree.sh" add "$tmp_root/r$round" "$reviewed" | tail -1) \
     || { out "BLOCKED #$pr 임시 worktree 를 만들지 못했다"; exit 1; }
   if ! git merge-base --is-ancestor "$base_sha" "$reviewed"; then
     case $method in
-      squash) # base 를 합친 tip, 고유 diff 판정. --no-ff: PR 이 base 의 조상이어도, merge.ff 설정이 어떻든 merge 커밋을 만든다
-        if ! git -C "$tree" merge -q --no-ff --no-edit -m "Merge $tbase into $branch" "$base_sha" >&2; then
-          git -C "$tree" diff --name-only --diff-filter=U >&2
+      squash) # base 를 합친 tip, 고유 diff 판정. --no-ff: PR 이 base 의 조상이어도, merge.ff 설정이 어떻든 merge 커밋을 만든다.
+        # rebase 갈래처럼 commit-msg, pre-merge-commit 훅과 서명 검사를 거치지 않는다
+        if ! git -C "$tree" -c merge.verifySignatures=false merge --no-verify -q --no-ff --no-edit -m "Merge $tbase into $branch" "$base_sha" \
+          >&2 2>"$tmp_root/base.err"; then
+          cat "$tmp_root/base.err" >&2
+          files=$(git -C "$tree" diff --name-only --diff-filter=U)
           git -C "$tree" merge --abort >&2
+          if [ -z "$files" ]; then
+            line=$(grep -v '^[[:space:]]*$' "$tmp_root/base.err" | tail -1)
+            out "BLOCKED #$pr base 를 합치지 못했다: $line"; exit 1
+          fi
+          printf '%s\n' "$files" >&2
           out "BLOCKED #$pr base 와 충돌한다 -- 따라잡기가 필요하다"; exit 1
         fi
         landed=$(git -C "$tree" rev-parse HEAD)

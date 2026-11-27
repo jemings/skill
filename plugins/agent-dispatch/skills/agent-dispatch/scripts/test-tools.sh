@@ -848,6 +848,35 @@ t_land_loop_squash_retry() { # 병합 때 base 가 움직이면 round 2 는 검�
     || bad "두 tip 이 검수한 SHA 에서 만든 것이 아니거나 둘째가 움직인 base $b 를 합치지 않았다"
   case $ERR in *경고*) bad "경고가 나왔다: $ERR" ;; esac
 }
+reject_hook() { # <훅 이름> -- $T/hooks 에 거절하는 훅을 두고 주 체크아웃의 core.hooksPath 로 건다(임시 worktree 도 따른다)
+  mkdir -p "$T/hooks"; printf '#!/bin/sh\necho "%s rejected" >&2\nexit 1\n' "$1" > "$T/hooks/$1"; chmod +x "$T/hooks/$1"
+  git -C "$T/repo" config core.hooksPath "$T/hooks"
+}
+t_land_loop_squash_no_verify() { # base 를 합치는 merge 는 rebase 처럼 commit-msg, pre-merge-commit 훅을 돌리지 않는다
+  local h
+  for h in commit-msg pre-merge-commit; do
+    squash_setup; base_commit d d; reject_hook "$h"
+    run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method squash --check true
+    expect_rc 0; expect_has "LANDED #7"
+  done
+}
+t_land_loop_squash_signatures() { # merge.verifySignatures=true 여도 base 의 서명을 따지지 않고 합친다(rebase 갈래와 같다)
+  squash_setup; base_commit d d; git -C "$T/repo" config merge.verifySignatures true
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method squash --check true
+  expect_rc 0; expect_has "LANDED #7"
+}
+t_land_loop_squash_merge_fails() { # 충돌 없이 merge 가 지면(prepare-commit-msg 훅이 거절) 충돌이 아닌 이유로 BLOCKED, 임시 worktree 를 남기지 않는다
+  squash_setup; base_commit d d; reject_hook prepare-commit-msg; mkdir "$T/tmp"
+  TMPDIR=$T/tmp run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method squash --check true
+  expect_rc 1; expect_not "충돌"; expect_not_called "pr merge"; expect_pr_branch "$HEAD_SHA"; expect_no_temp
+  case $(printf '%s\n' "$OUT" | tail -1) in "BLOCKED #7 base 를 합치지 못했다: "?*) ;; *) bad "마지막 줄이 base 를 합치지 못했다 이유가 아니다: $OUT" ;; esac
+  expect_err "prepare-commit-msg rejected"
+}
+t_land_loop_squash_context() { # base 가 PR 이 바꾼 줄 옆의 문맥 줄만 바꾸면 고유 diff(-U0)가 같아 넣는다
+  patch_setup; base_edit 3s/3/three/
+  run land.sh --repo o/r --pr 7 --sha "$HEAD_SHA" --method squash --check true
+  expect_rc 0; expect_has "LANDED #7"
+}
 t_land_loop_term_in_merge() { # 병합 호출 중에 TERM 을 받아도 병합이 이뤄졌으면 PR 브랜치를 되돌리지 않는다
   loop_setup; printf 'while [ ! -s %s/pid ]; do sleep 0.05; done; kill -TERM "$(cat %s/pid)"\n' "$T" "$T" > "$ST/merge_hook"
   ( cd "$T/repo" && exec bash "$SCRIPTS/land.sh" --repo o/r --pr 7 --sha "$HEAD_SHA" --pre-merge "$PRE" ) >"$T/so" 2>"$T/se" &
@@ -871,6 +900,7 @@ land_loop_retry land_loop_transient land_loop_check_fails land_loop_conflict lan
 land_loop_undo_round2 land_loop_undo_round1_noise land_loop_restore_lease land_loop_tip_unseen land_loop_move_other_msg land_loop_merge_commit_no_rebase
 land_loop_base land_loop_unknown land_loop_base_rewound land_loop_patch_count land_loop_hn_nopush
 land_loop_squash_catchup land_loop_squash_ancestor land_loop_squash_absorbed land_loop_squash_conflict land_loop_squash_retry
+land_loop_squash_no_verify land_loop_squash_signatures land_loop_squash_merge_fails land_loop_squash_context
 check_ok check_fails check_forbid_rename check_closes_body check_unknown check_args check_draft_ok check_draft_ready check_draft_unreadable
 check_verdict_ok check_verdict_short_sha check_verdict_old_sha check_verdict_no_placeholder check_verdict_newline check_verdict_labels
 check_carry_same_tree check_carry_allowed check_carry_outside check_carry_rebased check_carry_bad_sha
