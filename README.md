@@ -102,6 +102,8 @@ files — each is a self-contained, independently installable unit.
 ```
 .claude-plugin/
 └── marketplace.json                          # catalog: one entry per plugin below
+.github/workflows/
+└── checks.yml                                # CI: the guards and harnesses below on every PR and main push (not a required check)
 scripts/
 ├── check-ascii.sh                            # maintainer guard: non-ASCII (besides Hangul) under a path; not shipped with plugins
 ├── check-quotes.sh                           # maintainer guard: shell files whose quotes stay open to EOF (what the in-house scanner misreads, #38)
@@ -138,6 +140,8 @@ bash scripts/test-check-quotes.sh                                               
 bash scripts/check-scan.sh plugins                                              # whole in-house skill scanner, is_safe gate (exit 1 lists file:line:rule severity, exit 3 = scanner missing)
 bash scripts/test-check-scan.sh                                                 # check-scan.sh harness (stub scanner; SCANNER_BIN=<skill-scanner> adds a real-scanner differential)
 ```
+
+CI (`.github/workflows/checks.yml`) runs all of the above plus `actionlint` on every pull request and every push to `main`.
 
 ## License
 
