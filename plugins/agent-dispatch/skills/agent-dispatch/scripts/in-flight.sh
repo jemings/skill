@@ -127,7 +127,7 @@ path_rows() {
   local p
   for p in ${paths[@]+"${paths[@]}"}; do
     [ -e "$p" ] || continue
-    find "$p" \( -name node_modules -o -name .git \) -prune -o -type f -exec stat "$stat_opt" "$stat_fmt" {} + 2>/dev/null || true
+    find "$p" \( -name node_modules -o -name .git \) -prune -o -type f -print0 2>/dev/null | xargs -0 stat "$stat_opt" "$stat_fmt" 2>/dev/null || true
   done
 }
 # --path 를 인자에 담은 살아 있는 프로세스. 감시(이 스크립트) 자신은 뺀다
