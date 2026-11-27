@@ -130,3 +130,16 @@ SKILL_SCANNER=<dir>/bin/skill-scanner bash scripts/check-scan.sh plugins
 bash scripts/test-check-scan.sh
 SCANNER_BIN=<dir>/bin/skill-scanner bash scripts/test-check-scan.sh
 ```
+
+## PR 과 main push 마다 checks 워크플로가 검사를 돈다
+
+`.github/workflows/checks.yml`(job `checks`)이 PR(draft 포함)과 main push 마다 스캐너
+게이트(`check-scan.sh plugins`), `check-ascii.sh` / `check-quotes.sh`
+(`plugins/agent-dispatch`), 루트 하네스 둘, agent-dispatch `test-tools.sh` /
+`test-scripts.sh`, statusline-kit `test-install.sh`, actionlint 를 모두 돈다. 필수
+체크는 아니다(첫 초록 실행 뒤 사람이 판단한다). 그리고 위의 커밋 전 검사를 대신하지
+않는다. CI 는 늦게 알려 줄 뿐이다.
+
+- `.github/workflows/` 를 고쳤다면 커밋 전에 `actionlint` 를 돌린다.
+- 스캐너 버전을 올릴 때는 `git grep -n '<옛 버전>'` 으로 고정한 곳을 모두 찾아 함께 고친다. 동작하는 곳은 워크플로 `env.SCANNER_VERSION`, `scripts/check-scan.sh` 의 `EXPECTED_VERSION`/`INSTALL_HINT`, 하네스 `scripts/test-check-scan.sh`, CLAUDE.md 와 README 의 설치 명령이다. 워크플로와 CLAUDE.md 만 고치면 `check-scan.sh` 는 경고만 내고 CI 는 초록인 채 어긋난다.
+- statusline 표식 규칙(워킹트리와 HEAD 비교)은 CI 체크아웃에서 늘 통과한다. 로컬에서 돌린다.
