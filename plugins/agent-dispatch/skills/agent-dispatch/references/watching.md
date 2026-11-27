@@ -27,7 +27,7 @@ bash "${CLAUDE_SKILL_DIR}/scripts/wait-prs.sh" --repo <owner>/<repo> [--since <P
 - **`MERGED` -- 이 실행의 PR**: 다시 걸고, `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리한다.
   그다음 SKILL.md 8단계의 `LANDED` 처리를 그대로 한다.
 - **`MERGED`/`CLOSED` -- 남의 PR**: 다시 걸고, 상태 블록의 "처리한 착륙"에 적고 1단계로 돌아간다.
-- **`CONFLICTING`**(이 실행의 PR): 목록에서 빼고 다시 건다. Rebase 를 보낸다(단계 `rebase`). 돌아오면 7단계 검수 뒤
+- **`CONFLICTING`**(이 실행의 PR): 목록에서 빼고 다시 건다. 따라잡기를 보낸다(단계 `따라잡기`). 돌아오면 7단계 검수 뒤
   `land.sh` 를 다시 돌린다.
 - **`FEEDBACK` -- 이 실행의 PR**: 목록에서 빼고 다시 건다. 커서 뒤 피드백을 읽는다.
 

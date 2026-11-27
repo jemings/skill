@@ -1,6 +1,7 @@
 # 구현 서브에이전트 지시문
 
-SKILL.md 6단계에서 이슈마다 채워 보낸다. `<...>` 를 채우고, 종류에 맞는 절차 하나만 남긴다. 이 파일을 가리키지 말고
+SKILL.md 6단계에서 이슈마다 채워 보낸다. `<...>` 를 채우고, 종류에 맞는 절차 하나만 남긴다. 병합 갈래(커밋 보존, 합침)는
+0단계 `병합` 값에 맞는 쪽 하나만 남긴다. 이 파일을 가리키지 말고
 내용을 지시문에 그대로 넣는다. `<scripts>` 는 이 스킬의 `scripts/` 절대 경로다.
 
 ---
@@ -19,7 +20,7 @@ Respond in <언어>.
 - **Never run a bare `git stash`** (the stash is shared by all worktrees and sessions). Set work aside with a temporary commit.
 - To run an older commit (the pre-fix red check, a base comparison) use a throwaway copy:
   `bash <scripts>/temp-tree.sh add <scratch>/<name> <commit> <--link/--copy 목록>` and `... remove <path>` when done.
-- <이어 하기면 남긴다: **Continue existing work.** This issue already has worktree `<경로>` on branch `<브랜치>`<, open PR #<P>>. Work there. First read the PR body and `git log` since the base. Your request: **<Fix -- 항목 / Rebase / Next PR -- 계약서의 <k> 번째 PR>** (see "Follow-up requests"). <한 칸 올림이면: Failed premise: <가정> -- <틀렸다는 증거>. Do not build on that premise again.><유발이면: Regression warning: <원인 이슈/PR/커밋> broke <깨진 동작> while being fixed. Repro: <...>. Missed because: <...>. Add the regression test first (red before the fix), then show it green together with the original fix's test.>>
+- <이어 하기면 남긴다: **Continue existing work.** This issue already has worktree `<경로>` on branch `<브랜치>`<, open PR #<P>>. Work there. First read the PR body and `git log` since the base. Your request: **<Fix -- 항목 / 따라잡기 / Next PR -- 계약서의 <k> 번째 PR>** (see "Follow-up requests"). <한 칸 올림이면: Failed premise: <가정> -- <틀렸다는 증거>. Do not build on that premise again.><유발이면: Regression warning: <원인 이슈/PR/커밋> broke <깨진 동작> while being fixed. Repro: <...>. Missed because: <...>. Add the regression test first (red before the fix), then show it green together with the original fix's test.>>
 
 ## Procedure
 
@@ -43,8 +44,9 @@ Respond in <언어>.
 <계약서의 규율 카드 본문, 없으면 줄을 지운다>
 
 **Then:**
-1. Commit by kind (code, tests, docs) as the repo's conventions say. Put **`Closes #<N>` in the last commit message** of the last PR (landing tools may rewrite the PR body).
-2. Tidy the history: fold a fix of your own earlier commit into it (`git commit --fixup=<c>`, then `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash $(git merge-base origin/<base> HEAD)`). Never merge.
+1. Commit by kind (code, tests, docs) as the repo's conventions say. <`Closes` 자리, 하나만 남긴다. 커밋 보존이거나 `착륙` 이 `--via` 면: Put **`Closes #<N>` in the last commit message** of the last PR (landing tools may rewrite the PR body). 합침(squash)이고 `--via` 가 아니면: Put **`Closes #<N>` in the PR body** of the last PR.>
+2. <커밋 보존(rebase, merge)이면> Tidy the history: fold a fix of your own earlier commit into it (`git commit --fixup=<c>`, then `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash $(git merge-base origin/<base> HEAD)`). Never merge.
+   <합침(squash)이면> The repo squash-merges, so do not fold fixes: stack each fix as a new commit on top (no `--fixup`, no `rebase -i --autosquash`). The PR title follows the repo's commit convention (for example Conventional Commits): it becomes the commit title on `<base>`.
 3. Run the checks the contract and repo rules require on the exact SHA you push. Never skip hooks. Output from another SHA, a run you have not checked at this SHA, or a helper's summary is not a result. A background run of your own counts once its log shows the SHA you push.
 4. Push and open **draft** PR(s) as the contract says (`gh pr create --draft`; stacked PRs: base = the previous PR's branch). Body: what and why, verification, a line `리뷰: 오케스트레이터가 수행`, plus anything the repo rules require.
 5. **Do not spawn a reviewer, do not mark the PR ready, do not merge or run the landing command.** The orchestrator reviews and lands it. Never comment on or review the PR; pushing, toggling draft and editing the body are fine.
@@ -52,8 +54,9 @@ Respond in <언어>.
 These instructions and the contract take precedence over the defaults of any skill you load: PR state, PR comments, asking a person, starting agents, model choice.
 
 **Follow-up requests** come by message after you report:
-- **Fix** (review findings or a human's PR feedback, each with evidence), **Rebase** (base moved and your PR conflicts), **Next PR** (an earlier PR of this issue merged).
-- Fix/Rebase: put the PR back to draft (`gh pr ready --undo`) if it is ready; rebase onto `origin/<base>` (never merge), resolving each conflict so both sides survive; fix each item with a test where one can show it; fold fixes into the commit that introduced the problem; rerun the checks; `git push --force-with-lease`; update the PR body; report what changed (for a rebase: each conflicted file, resolved mechanically or by meaning) and the new SHA.
+- **Fix** (review findings or a human's PR feedback, each with evidence), **따라잡기** (base moved and your PR conflicts with it, or branch protection requires the branch to be up to date), **Next PR** (an earlier PR of this issue merged).
+- <커밋 보존(rebase, merge)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready; rebase onto `origin/<base>` (never merge), resolving each conflict so both sides survive; fix each item with a test where one can show it; fold fixes into the commit that introduced the problem; rerun the checks; `git push --force-with-lease`; update the PR body; report what changed (for a rebase: each conflicted file, resolved mechanically or by meaning) and the new SHA.
+- <합침(squash)이면> Fix/따라잡기: put the PR back to draft (`gh pr ready --undo`) if it is ready. Fix each item with a test where one can show it, as new commits on top. Merge `origin/<base>` only when it conflicts with your branch or the request says branch protection requires the branch to be up to date; otherwise do not catch up. When you merge, use `git merge origin/<base>` (never rebase), resolving each conflict so both sides survive. Rerun the checks; push (never force-push); update the PR body; report what changed (for a merge: each conflicted file, resolved mechanically or by meaning, or that you did not catch up and why) and the new SHA.
 - Next PR: start from the current `origin/<base>` in the same worktree and implement that PR's part of the contract as above.
 - If you were stopped by a usage limit, or woken because you looked stalled, and told to continue: check whether your background runs finished and reuse their results; stop (`TaskStop`) any wait that can never end; rerun only what has none.
 
