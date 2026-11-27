@@ -1,0 +1,82 @@
+name: checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  SCANNER_VERSION: 2.3.2
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # history 시험이 과거 커밋(aca90b5, b225ec5, ece1885)을 찾는다. 얕은 clone 이면 그 경우를 SKIP 하고 초록이 된다.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 스캐너 설치
+        run: |
+          python3 -m venv "$RUNNER_TEMP/scanner"
+          "$RUNNER_TEMP/scanner/bin/pip" install "cisco-ai-skill-scanner==${SCANNER_VERSION}"
+          {
+            echo "SKILL_SCANNER=$RUNNER_TEMP/scanner/bin/skill-scanner"
+            echo "SCANNER_BIN=$RUNNER_TEMP/scanner/bin/skill-scanner"
+            echo "SCANNER_PY=$RUNNER_TEMP/scanner/bin/python"
+          } >> "$GITHUB_ENV"
+
+      # pull 실패를 삼키면 test-scripts.sh 가 bash:3.2 경우를 SKIP 하고 초록이 된다.
+      - name: bash:3.2 이미지 받기
+        run: docker pull bash:3.2
+
+      - name: 스킬 스캐너 게이트
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-scan.sh plugins
+
+      - name: agent-dispatch ASCII
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-ascii.sh plugins/agent-dispatch
+
+      - name: agent-dispatch 따옴표 짝
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-quotes.sh plugins/agent-dispatch
+
+      - name: test-check-quotes.sh
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-check-quotes.sh
+
+      - name: test-check-scan.sh
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-check-scan.sh
+
+      - name: agent-dispatch test-tools.sh
+        if: ${{ !cancelled() }}
+        run: bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-tools.sh
+
+      - name: agent-dispatch test-scripts.sh
+        if: ${{ !cancelled() }}
+        run: bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-scripts.sh
+
+      - name: statusline-kit test-install.sh
+        if: ${{ !cancelled() }}
+        run: bash plugins/statusline-kit/skills/statusline-kit/scripts/test-install.sh
+
+      - name: actionlint
+        if: ${{ !cancelled() }}
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
