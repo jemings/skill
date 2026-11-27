@@ -26,7 +26,8 @@ ship inside the plugin.
 - **[GitHub CLI](https://cli.github.com)** authenticated (`gh auth login`).
   Needed by `gh-pr-reply`, `gh-pr-approve`, and `agent-delegation`.
 - **`jq`**, **`git`**, **`bash` 4+**.
-- `perl` for the maintainer guards under `scripts/` (`check-ascii.sh`, `check-quotes.sh`).
+- `perl` for the maintainer guards under `scripts/` (`check-ascii.sh`, `check-quotes.sh`, `check-scan.sh`).
+- For maintainers: the in-house skill scanner `cisco-ai-skill-scanner==2.3.2` (Python 3.11-3.14), used by `scripts/check-scan.sh`. Install it once (only the install needs network): `uv venv <dir> && uv pip install --python <dir>/bin/python cisco-ai-skill-scanner==2.3.2`, then `SKILL_SCANNER=<dir>/bin/skill-scanner`.
 - Optional: `shellcheck` (lint of any shell scripts), `actionlint` (workflow lint).
 - `statusline-kit`, `skill-optimizer`, and `agent-clinic` have no external dependencies
   beyond `bash`.
@@ -104,7 +105,9 @@ files — each is a self-contained, independently installable unit.
 scripts/
 ├── check-ascii.sh                            # maintainer guard: non-ASCII (besides Hangul) under a path; not shipped with plugins
 ├── check-quotes.sh                           # maintainer guard: shell files whose quotes stay open to EOF (what the in-house scanner misreads, #38)
-└── test-check-quotes.sh                      # harness for check-quotes.sh (optional SCANNER_PY differential)
+├── test-check-quotes.sh                      # harness for check-quotes.sh (optional SCANNER_PY differential)
+├── check-scan.sh                             # maintainer guard: runs the in-house skill scanner over a path, fails on is_safe: false (exit 3 = scanner unusable)
+└── test-check-scan.sh                        # harness for check-scan.sh (stub scanner; optional SCANNER_BIN differential)
 plugins/
 ├── gh-pr-reply/   (plugin.json + skills/gh-pr-reply/{SKILL.md, references/})
 ├── gh-pr-approve/ (plugin.json + skills/gh-pr-approve/{SKILL.md, references/})
@@ -132,6 +135,8 @@ bash plugins/agent-dispatch/skills/agent-dispatch/scripts/test-tools.sh     # ag
 bash scripts/check-ascii.sh plugins/agent-dispatch                              # agent-dispatch must stay ASCII punctuation (exit 1 lists offenders)
 bash scripts/check-quotes.sh plugins/agent-dispatch                             # unbalanced quotes the in-house scanner would misread (exit 1 lists file:line:state)
 bash scripts/test-check-quotes.sh                                               # check-quotes.sh harness (SCANNER_PY=<scanner python> adds a differential run)
+bash scripts/check-scan.sh plugins                                              # whole in-house skill scanner, is_safe gate (exit 1 lists file:line:rule severity, exit 3 = scanner missing)
+bash scripts/test-check-scan.sh                                                 # check-scan.sh harness (stub scanner; SCANNER_BIN=<skill-scanner> adds a real-scanner differential)
 ```
 
 ## License

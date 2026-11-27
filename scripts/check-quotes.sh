@@ -10,7 +10,7 @@
 # 왜: cisco-ai-skill-scanner 의 주석 제거가 따옴표 상태를 줄 사이로 이어 가므로,
 # "$(grep -c '..."...' ...)" 꼴의 한 줄에서 짝이 어긋나면 파일 끝까지 따옴표가 열린 채로 남고,
 # 그 뒤의 한글 주석이 코드로 분석되어 HOMOGLYPH_ATTACK(HIGH) 오탐이 난다(#38).
-# check-ascii.sh 는 한글을 허용하니 못 잡고, 스캐너는 네트워크가 필요해 평소 검사로 쓰기 어렵다.
+# check-ascii.sh 는 한글을 허용하니 못 잡고, 스캐너는 설치에 네트워크가 필요하다(스캔 자체는 check-scan.sh).
 #
 # 규칙: cisco-ai-skill-scanner 2.3.2 skill_scanner/core/static_analysis/comment_stripping.py 의
 # _strip_bash_comments 의 따옴표 상태 기계를 그대로 옮겼다. 스캐너를 올리면 이 규칙도 다시 맞춘다
