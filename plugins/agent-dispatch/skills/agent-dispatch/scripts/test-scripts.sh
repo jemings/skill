@@ -1391,7 +1391,7 @@ case_dispatch_prose_static() { # 지시문, 규율 카드: 정책 문장, pstack
   local gr th line n
   gr=$(awk '/^- \*\*한 칸 올려 다시 보낸다\*\*/ { f = 1; print; next } /^- \*\*사람에게 넘긴다\*\*/ { f = 0 } f' "$sk")
   [ -n "$gr" ] || bad "(j) 등급 절에 '한 칸 올려 다시 보낸다' 항목이 없다"
-  for f in '수정이 새 결함을 들였다' '이슈 안: ' '이슈 사이: ' '거짓 시험, 범위 밖 변경, 규칙 위반은 계기가 아니다' '견주어 높은 쪽' '`blocker`/`major`' '`SendMessage` 가 아니라 한 칸 올려' '원인 PR 의 구현 등급보다 한 칸 위' '수정 전 사본에서 재현이 없고' '수정 사본에서 있다' '판정을 못 하면 계기로 치지 않는다' '`Regression warning`' '`올림` 으로 센다' '올림은 이슈당 한 번이다' '0 으로 되돌린다' '더 올리지 않고' '리뷰 등급은 그대로다' '그 Fix 를 보내던 때의 PR HEAD' '동작이 깨졌다고 재현되는' '결함을 고친 Fix 라운드가 든 PR' '`Failed premise` 대신' '원인 PR 등급이 가장 높으면' '모르면 계약서 기준 등급' '진행 목록에 `올림 1` 로 적고' '`올림 0` 이다' '원인 이슈와 PR 을 적는다' '같은 내용을 메시지에 넣는다' '그 뒤 상한을 넘으면 사람에게 넘긴다'; do
+  for f in '수정이 새 결함을 들였다' '이슈 안: ' '이슈 사이: ' '거짓 시험, 범위 밖 변경, 규칙 위반은 계기가 아니다' '견주어 높은 쪽' '`blocker`/`major`' '`SendMessage` 가 아니라 한 칸 올려' '원인 PR 의 구현 등급보다 한 칸 위' '수정 전 사본에서 재현이 없고' '수정 사본에서 있다' '판정을 못 하면 계기로 치지 않는다' '`Regression warning`' '`올림` 으로 센다' '올림은 이슈당 한 번이다' '더 올리지 않고' '리뷰 등급은 그대로다' '그 Fix 를 보내던 때의 PR HEAD' '동작이 깨졌다고 재현되는' '결함을 고친 Fix 라운드가 든 PR' '`Failed premise` 대신' '원인 PR 등급이 가장 높으면' '모르면 계약서 기준 등급' '진행 목록에 `올림 1` 로 적고' '`올림 0` 이다' '원인 이슈와 PR 을 적는다' '같은 내용을 메시지에 넣는다'; do
     case $gr in *"$f"*) ;; *) bad "(j) 등급 절 '한 칸 올려 다시 보낸다' 항목에 '$f' 가 없다" ;; esac
   done
   case $ts5 in *'이슈 사이 계기대로 매긴다'*) ;; *) bad "(j) 1단계 5항에 등급 문구 '이슈 사이 계기대로 매긴다' 가 없다" ;; esac
@@ -1495,6 +1495,38 @@ case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블�
   grep -qF '`수정`, `따라잡기`, `다음 PR 대기`' "$sk" || bad "(h) 진행 목록 단계에 '따라잡기' 가 없다"
   grep -qF 'squash 병합을 전제해' "$dc" && bad "(h) disciplines.md 에 'squash 병합을 전제해' 가 남아 있다"
   grep -qF '직접 병합해 `land.sh` 와 부딪힌다' "$dc" || bad "(h) disciplines.md 에 '직접 병합해 \`land.sh\` 와 부딪힌다' 가 없다"
+}
+
+# 리뷰 라운드, 되돌림에 숫자 상한이 없고 오케스트레이터가 다음 처리를 판단한다(#87). 구절은 절마다 가둬 찾는다.
+case_judgment_static() { # 상한 문구 부재, 걸림 문단의 판단 규칙, 등급 절 계기와 올림, 상태 블록, 정의, 착륙 기록
+  local dir=$SCRIPTS/.. sk f sec all
+  sk=$dir/SKILL.md
+  # (a) 어디에도 숫자 상한이 없다
+  all=$(cat "$sk" "$dir"/references/*.md | joined)
+  for f in '되돌림 <n>/2' '리뷰 라운드 <n>/2' '두 라운드' '두 번까지다' '두 번 되돌려도' '보통 상한을' '상한을 넘으면' '되돌림과 리뷰 라운드를 0' '리뷰 라운드는 0 으로'; do
+    case $all in *"$f"*) bad "(a) '$f' 가 남아 있다" ;; esac
+  done
+  # (b) 7단계 걸림 문단: 판단 규칙
+  sec=$(awk '/^\*\*걸림\*\*/ { f = 1 } /^## 8\./ { f = 0 } f' "$sk" | joined)
+  [ -n "$sec" ] || bad "(b) 7단계에 '걸림' 문단이 없다"
+  for f in '숫자 상한은 두지 않는다' '남은 지적의 크기와 성격을 보고' '**기계 확인**' '남은 지적이 하나이고' 'Fix 를 보내기 **전에** 정해 둘 수 있을 때' \
+    'pr-check.sh --carry <리뷰한 SHA> --may-touch' '**다음 PR 첫 할 일**' '한 번 넘긴 지적은 다시 넘기지 않는다' '`판단:` 한 줄' '`리뷰하지 못한 범위`' \
+    '기본이 재리뷰다' '(iii) 구현자가'; do
+    case $sec in *"$f"*) ;; *) bad "(b) 7단계 걸림 문단에 '$f' 가 없다" ;; esac
+  done
+  # (c) 등급 절: 계기와 올림. 올림은 이슈당 한 번이다
+  sec=$(awk '/^- \*\*한 칸 올려 다시 보낸다\*\*/ { f = 1; print; next } /^- \*\*사람에게 넘긴다\*\*/ { f = 0 } f' "$sk" | joined)
+  for f in '되돌려도 같은 지적이 풀리지 않는다고 판단했다' '올림은 이슈당 한 번이다(`올림` 으로 센다)' '7단계 걸림 문단의 판단을 따르고, 더 올릴 수 없으면 사람에게 넘긴다'; do
+    case $sec in *"$f"*) ;; *) bad "(c) 등급 절에 '$f' 가 없다" ;; esac
+  done
+  # (d) 상태 블록과 정의: 센 값은 정보용이다
+  f=$(grep -F '#<z> 수정, ' "$sk" | tail -n 1)
+  case $f in *'되돌림 <n>, 리뷰 라운드 <n>, '*) ;; *) bad "(d) 상태 블록 '#<z> 수정' 줄에 '되돌림 <n>, 리뷰 라운드 <n>' 이 없다" ;; esac
+  case $(joined < "$sk") in *'`리뷰 라운드` 는 검수에서 네가 띄운 리뷰어의 수(사람이 요청한 Fix 는 세지 않는다)'*) ;; *) bad "(d) '리뷰 라운드' 정의가 없다" ;; esac
+  # (e) 8단계 1항 착륙 기록에 판단 한 줄
+  sec=$(awk '/^1\. \*\*착륙 기록\*\*/ { f = 1 } /^2\. 넣는다/ { f = 0 } f' "$sk" | joined)
+  case $sec in *'`판단:` 한 줄'*) ;; *) bad "(e) 8단계 1항 착륙 기록에 '판단:' 한 줄이 없다" ;; esac
+  grep -qF '되돌림, 리뷰 라운드에 세지 않는다' "$dir/references/watching.md" || bad "(e) watching.md 에 사람이 요청한 Fix 는 세지 않는 문장이 없다"
 }
 
 # ---- 정적 검사 ----
@@ -1861,6 +1893,7 @@ CASES=(
   'in-flight --where: SKILL.md 정적 검사:case_where_skill_static'
   '지시문, 규율 카드 정적 검사:case_dispatch_prose_static'
   '병합 방식 정적 검사:case_merge_method_static'
+  '판단 규칙 정적 검사(숫자 상한 없음):case_judgment_static'
   'in-flight 7 6 -> 0바이트 claim 이 판정을 막지 않는다:case_flight_empty_claim_file'
   'in-flight 7 6 -> 깨진 claim 이 판정을 막지 않는다:case_flight_broken_claim_file'
   'in-flight --claim -> 임시 파일이 남지 않고 새 파일로 바뀐다:case_flight_claim_atomic'
