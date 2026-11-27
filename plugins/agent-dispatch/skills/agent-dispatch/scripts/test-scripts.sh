@@ -1462,6 +1462,16 @@ case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블�
     '    범위에 있어도 된다. 한쪽이 비면 예외가 아니다. `land.sh` 의 고유 diff 판정과 같은 명령이다.'
   )
   local patch_row='| `BLOCKED ... base 를 얹은 뒤 패치가 달라졌다` | 따라잡기 요청(단계 `따라잡기`). 0단계 `병합` 이 squash 면 요청에 이 판정 줄을 적는다(구현자는 그때 `git merge origin/<base>` 로 따라잡는다). 돌아오면 7단계(재리뷰가 기본) |'
+  local squash_header=(
+    '#   squash: rebase 하지 않고 git merge --no-ff <base> 로 base 를 합친 tip(rebase 처럼 commit-msg, pre-merge-commit 훅과'
+    '#   서명 검사를 거치지 않는다). 고유 diff 판정: <rev> 마다'
+    '#   git diff -U0 $(git merge-base <rev> <base>) <rev> | git patch-id --stable 의 patch-id 가 검수한 SHA 와 그 tip 에서 같아야 한다'
+    '#   (tip 쪽이 비어도 바뀐 것이다. 범위의 merge 커밋은 괜찮다).'
+  )
+  local tool_row='| `land.sh` | 기록을 이슈에 남기고, ready, 대상 변경, 병합(저장소 착륙 명령 또는 gh), 스택 앞 층 닫기, 뒷정리. 저장소 명령(검사, 병합 전)이 있으면 착륙 tip(커밋 보존은 rebase 와 커밋 패치 판정, squash 는 base 를 merge 로 합치고 고유 diff 판정), 검사, 병합 전 커밋, base 이동 시 재시도 | 8 |'
+  local needs_human_row='| `NEEDS_HUMAN #P ...` | 보호 규칙이 사람의 승인을 요구한다. 단계 `사람 병합 대기`, 9단계로 지켜본다. 저장소 명령으로 넣어 push 했으면(stderr 에 `land: 올린 tip` 줄이 있으면) PR HEAD 는 검수한 SHA 가 아니라 그 tip(사람이 넣을 착륙 tip 과 병합 전 커밋)으로 남는다. 그때는 옛 `--sha` 로 `land.sh` 를 다시 부르지 않는다(`검수한 SHA 와 다르다` 로 멈추고, 그 행의 손 복원이 사람이 넣을 판을 지운다). 그 줄이 없으면(base 가 이미 조상이고 병합 전 커밋이 없었으면) 올린 것이 없어 PR HEAD 는 검수한 SHA 그대로다. 사람이 넣으면 `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리한다 |'
+  local merge_fail_row='| `BLOCKED ... base 를 합치지 못했다: <오류>` | squash 고리 모드에서 충돌 없이 base 를 합치는 merge 가 졌다(PR 탓이 아니다). 오류 줄과 stderr 를 읽고 저장소 설정, 훅, 디스크처럼 환경 탓이면 고쳐 같은 명령으로 다시 부르고, 네가 풀 수 없으면 사람에게 넘긴다 |'
+  local land_head_line='# LAND_BASE_SHA(round 의 base) LAND_SHA(검수한 SHA, 40자) LAND_HEAD(착륙 tip).'
   # (a) 0단계 착륙, 병합 항목 전체: 고리 모드의 착륙 tip 두 갈래, 출처 우선순위, 허용하지 않으면 묻기, --via, 두 갈래와 합침의 따라잡기 조건
   exact_block '(a) 0단계 착륙 항목' "$(item_in "$sk" '^## 0[.] ' '^- [*][*]착륙[*][*]:')" "${land_item[@]}"
   exact_block '(a) 0단계 병합 항목' "$(item_in "$sk" '^## 0[.] ' '^- [*][*]병합[*][*]:')" "${merge_item[@]}"
@@ -1496,9 +1506,17 @@ case_merge_method_static() { # 병합 방식: 0단계 우선순위, 상태 블�
   f=$(awk '/^## / { s = ($0 ~ /^## 8\./) } s' "$sk" | grep -F '| `BLOCKED ... base 를 얹은 뒤 패치가 달라졌다` |' || true)
   [ "$f" = "$patch_row" ] || bad "(e) 8단계 표의 '패치가 달라졌다' 행이 기대한 글 하나가 아니다: $f"
   all=$(cat "$sk" "$dir"/references/*.md "$SCRIPTS/land.sh")
-  for f in 'rebase 가 패치를 바꿨다' '고리 모드의 squash 지원은 후속 이슈'; do
+  for f in 'rebase 가 패치를 바꿨다' '고리 모드의 squash 지원은 후속 이슈' 'rebase 된 tip'; do
     case $all in *"$f"*) bad "(e) '$f' 가 남아 있다" ;; esac
   done
+  # 착륙 tip 두 갈래: 도구 표 land.sh 행, NEEDS_HUMAN 행, squash 의 합치지 못했다 행은 통째로, land.sh 헤더의 squash 갈래와 LAND_HEAD 줄도 통째로
+  f=$(grep -F '| `land.sh` |' "$sk" || true); [ "$f" = "$tool_row" ] || bad "(e) 도구 표의 land.sh 행이 기대한 글 하나가 아니다: $f"
+  f=$(awk '/^## / { s = ($0 ~ /^## 8\./) } s' "$sk" | grep -F '| `NEEDS_HUMAN #P ...` |' || true)
+  [ "$f" = "$needs_human_row" ] || bad "(e) 8단계 표의 NEEDS_HUMAN 행이 기대한 글 하나가 아니다: $f"
+  f=$(awk '/^## / { s = ($0 ~ /^## 8\./) } s' "$sk" | grep -F '| `BLOCKED ... base 를 합치지 못했다: <오류>` |' || true)
+  [ "$f" = "$merge_fail_row" ] || bad "(e) 8단계 표의 '합치지 못했다' 행이 기대한 글 하나가 아니다: $f"
+  exact_block '(e) land.sh 헤더 squash 갈래' "$(awk '/^#   squash: / { f = 1 } /^# 그다음 검사 명령/ { f = 0 } f' "$SCRIPTS/land.sh")" "${squash_header[@]}"
+  grep -qxF -- "$land_head_line" "$SCRIPTS/land.sh" || bad "(e) land.sh 헤더에 LAND_HEAD 를 착륙 tip 으로 적은 줄이 없다"
   # (f) 구현 지시문: 갈래 두 벌(Then 2, Follow-up), 합침 갈래의 문장, 커밋 보존 갈래는 그대로
   [ "$(grep -cF '<커밋 보존(rebase, merge)이면>' "$ib")" = 2 ] || bad "(f) implement-brief 의 커밋 보존 갈래가 두 곳(Then, Follow-up)이 아니다"
   [ "$(grep -cF '<합침(squash)이면>' "$ib")" = 2 ] || bad "(f) implement-brief 의 합침 갈래가 두 곳(Then, Follow-up)이 아니다"

@@ -39,7 +39,7 @@ description: >-
 | `pr-check.sh` | PR 모양: 열림, draft(`--draft`), 대상, HEAD 일치, 깨끗한 트리, 충돌, `Closes #N`, 금지 trailer, 금지 경로. 증거 판정: 판정 줄(`--verdict`), 이어 받기(`--carry`/`--may-touch`) -> EVIDENCE OK/RERUN | 7 |
 | `temp-tree.sh` | 던져 둘 사본(detached worktree) 만들기와 지우기. 의존성 symlink, 복사, 표식 파일 | 7, 리뷰어, 구현자 |
 | `mutate.sh` | 변이 하나를 걸고 시험을 돌린 뒤 되돌린다. KILLED/SURVIVED | 7, 리뷰어 |
-| `land.sh` | 기록을 이슈에 남기고, ready, 대상 변경, 병합(저장소 착륙 명령 또는 gh), 스택 앞 층 닫기, 뒷정리. 저장소 명령(검사, 병합 전)이 있으면 rebase, 패치 판정, 검사, 병합 전 커밋, base 이동 시 재시도 | 8 |
+| `land.sh` | 기록을 이슈에 남기고, ready, 대상 변경, 병합(저장소 착륙 명령 또는 gh), 스택 앞 층 닫기, 뒷정리. 저장소 명령(검사, 병합 전)이 있으면 착륙 tip(커밋 보존은 rebase 와 커밋 패치 판정, squash 는 base 를 merge 로 합치고 고유 diff 판정), 검사, 병합 전 커밋, base 이동 시 재시도 | 8 |
 | `wait-prs.sh` | 사람이 넣어야 하는 PR, 남의 PR 을 지켜본다 | 9 |
 
 ## 실행 전반의 원칙
@@ -457,6 +457,7 @@ worktree, PR 이 생기지 않게 한다.
 | `BLOCKED ... PR 이 열려 있지 않다(MERGED)` | 병합 뒤 정리 전에 끝났다. `land.sh --cleanup --repo <o>/<r> --pr <P> --issue <N>` 으로 뒷정리하고 `LANDED` 처리를 한다. `(CLOSED)` 면 누가 닫았으니 사람에게 넘긴다 |
 | `BLOCKED ... 저장소가 <방식> 병합을 허용하지 않는다` | `--method` 로 준 방식을 저장소 설정이 막았다. 기록, 대상 변경, push, ready 전에 멈췄으니 PR 은 draft 그대로다. 0단계 `병합` 방식을 고치거나(규칙과 설정을 다시 읽는다) `AskUserQuestion` 으로 사람에게 묻고, 정한 방식으로 다시 부른다 |
 | `BLOCKED ... base 와 충돌한다 -- 따라잡기가 필요하다` | 따라잡기 요청(단계 `따라잡기`). 충돌 파일은 stderr 에 있다. 돌아오면 7단계 |
+| `BLOCKED ... base 를 합치지 못했다: <오류>` | squash 고리 모드에서 충돌 없이 base 를 합치는 merge 가 졌다(PR 탓이 아니다). 오류 줄과 stderr 를 읽고 저장소 설정, 훅, 디스크처럼 환경 탓이면 고쳐 같은 명령으로 다시 부르고, 네가 풀 수 없으면 사람에게 넘긴다 |
 | `BLOCKED ... base 를 얹은 뒤 패치가 달라졌다` | 따라잡기 요청(단계 `따라잡기`). 0단계 `병합` 이 squash 면 요청에 이 판정 줄을 적는다(구현자는 그때 `git merge origin/<base>` 로 따라잡는다). 돌아오면 7단계(재리뷰가 기본) |
 | `BLOCKED ... 검사 실패: <cmd>` | stderr 의 출력을 읽고 Fix(단계 `수정`). PR 은 draft 로 남아 있다 |
 | `BLOCKED ... 병합 전 명령이 실패했다: <cmd>` | stderr 의 출력을 읽는다. 저장소 쪽 일시 오류면 한 번 더, PR 탓이면 Fix(단계 `수정`) |
